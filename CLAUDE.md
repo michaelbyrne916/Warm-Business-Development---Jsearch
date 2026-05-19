@@ -137,3 +137,17 @@ When using `n8n_update_partial_workflow`, the correct structure is:
 | 2026-05-13 | WF3: Outreach Draft | ACTION 6: Deleted node `wf3-create-doc` (Create Google Doc Review Packet) — was already disabled, terminal node with no downstream connections. WF3 validates clean (0 errors). |
 | 2026-05-13 | WF2/4/5/7: All | ACTION 7: Applied `retryOnFail: true, maxTries: 3, waitBetweenTries: 10000` to 21 Sheets write nodes: WF2 (7 nodes), WF4 (7 nodes), WF5 (3 nodes), WF7 (4 nodes: n11, n19, n21, n23). |
 | 2026-05-13 | WF6: Warm to Cold | ACTION 8: Added explicit REJECT guard in node n05 (`Filter + Join + Dedup`) — after `sentStatus !== 'sent'` check, added `if ((row.approval_status || '').toUpperCase() === 'REJECT') continue;`. Belt-and-suspenders against WF5 failing to archive REJECTs before Sunday 5am. Validation: 0 new errors (5 pre-existing false positives unchanged). |
+
+### 2026-05-19 — WF4 phantom follow-up incident
+
+- **Diagnosed:** `Build Follow-up Sequence` was reading `$('Check Suppression').all()` (all 50 approved rows) instead of `$('Prepare Send Fields').all()` (only the rows that cleared suppression + DRY_RUN). Result: 45 phantom stage-1 follow-ups scheduled for 2026-05-22 to contacts who never received Email 1, plus a recurring "Attach Suppression List → 0 → halt" loop blocking all subsequent WF4 runs.
+- **Fix 1** (live in WF4 `QG8tNjLdKCQkZpWA`, exec 9761 baseline): `Build Follow-up Sequence` input source changed to `$('Prepare Send Fields').all()`. Committed locally as `b42098b`.
+- **Fix 2** (one-shot cleanup workflow `r839lZSMkYZz7pnj`, exec 9773): deleted 45 Bucket A phantom rows, preserved 5 Bucket B legit follow-ups. Workflow archived in n8n (renamed `ARCHIVED — …`, inactive), retained as reference.
+- **Open:** Cause 2 — WF2 should pre-filter contacts against the suppression list before writing to Outreach Queue. Ticketed for week of 2026-05-26 after observing a clean 5/22 follow-up cycle.
+
+---
+
+## Key Learnings
+
+- **n8n silent-halt pattern:** `runOnceForAllItems` Code nodes do **not** execute when the upstream node outputs 0 items. Assert/safety nodes that rely on `$input.all()` are bypassed entirely on empty input (no error, execution just ends "success"). Fix: reference an upstream node explicitly, e.g. `$('Upstream Node').all().length`, so the safety node fires regardless of its direct input count. Apply to all future safety/assert nodes.
+- **Follow-up scheduling rule:** Nodes that schedule downstream actions (follow-ups, retries, notifications) must source their input from a node that is **post-action-success**, never from the pre-gate queue. Sourcing pre-gate means scheduling actions for items that may never have actioned (the root cause of the 2026-05-19 WF4 phantom follow-up incident).
