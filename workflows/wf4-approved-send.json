@@ -1,0 +1,1103 @@
+{
+  "name": "WF4: Approved Send",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "wf4-trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8,10,12,14,16 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "wf4-trigger-schedule",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Outreach Queue",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": []
+        },
+        "options": {}
+      },
+      "id": "wf4-read-approved",
+      "name": "Read Approved Rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        448,
+        384
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "id": "row-check",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "wf4-check-has-rows",
+      "name": "Any Approved Rows?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        672,
+        384
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "wf4-no-rows",
+      "name": "No Rows to Send",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        880,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Suppression List",
+          "mode": "name"
+        },
+        "options": {
+          "alwaysOutputData": true
+        }
+      },
+      "id": "wf4-read-suppression",
+      "name": "Read Suppression List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        880,
+        288
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build suppression map from input (Read Suppression List)\nconst suppressionRows = $input.all().map(i => i.json);\nconst suppressionMap = new Map();\nfor (const row of suppressionRows) {\n  const key = `${(row.company_domain || '').toLowerCase()}|${(row.contact_email || '').toLowerCase()}`;\n  if (row.suppressed_until) {\n    suppressionMap.set(key, new Date(row.suppressed_until));\n  }\n}\n\n// Filter approved, unsent, due rows from Outreach Queue\nconst today = new Date();\ntoday.setHours(23, 59, 59, 999);\nconst now = new Date();\n\nconst allApproved = $('Read Approved Rows').all();\nconst approvedRows = allApproved.filter(item => {\n  const approvalStatus = (item.json.approval_status || '').trim().toLowerCase();\n  if (approvalStatus !== 'approved') return false;\n  const sentStatus = (item.json.sent_status || '').trim().toLowerCase();\n  if (sentStatus !== 'unsent') return false;\n  const scheduledDate = (item.json.scheduled_date || '').trim();\n  if (!scheduledDate) return true;\n  return new Date(scheduledDate) <= today;\n});\n\n// Check suppression and deduplicate within batch — no serialization\nconst seen = new Set();\n\nreturn approvedRows.map(item => {\n  const row = { ...item.json };\n  const key = `${(row.company_domain || '').toLowerCase()}|${(row.contact_email || '').toLowerCase()}`;\n  const followUpStage = parseInt(row.follow_up_stage || '0');\n\n  let isSuppressed = false;\n  let suppressionReason = '';\n\n  // Only check suppression for stage 0 (initial email)\n  if (followUpStage === 0 && suppressionMap.has(key)) {\n    const suppressedUntil = suppressionMap.get(key);\n    if (now < suppressedUntil) {\n      isSuppressed = true;\n      suppressionReason = `In suppression list until ${suppressedUntil.toISOString().split('T')[0]}`;\n    }\n  }\n\n  // Deduplicate within this batch\n  if (seen.has(key)) {\n    isSuppressed = true;\n    suppressionReason = 'Duplicate in current batch';\n  }\n  seen.add(key);\n\n  row._is_suppressed = isSuppressed;\n  row._suppression_reason = suppressionReason;\n\n  return { json: row };\n});"
+      },
+      "id": "wf4-merge-suppression-data",
+      "name": "Attach Suppression List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Suppression check and dedup are handled upstream in Attach Suppression List.\n// Pass items through unchanged.\nreturn $input.all().map(item => ({ json: item.json }));"
+      },
+      "id": "wf4-check-suppression",
+      "name": "Check Suppression",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "id": "suppress-check",
+              "leftValue": "={{ $json._is_suppressed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "wf4-suppression-gate",
+      "name": "Suppression Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "workflow_name": "WF4: Approved Send",
+            "node_name": "Suppression Gate",
+            "error_message": "=SUPPRESSED: {{ $json._suppression_reason }}",
+            "input_data": "={{ $json.opportunity_id }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "wf4-log-suppressed",
+      "name": "Log Suppressed (Skip)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        448
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "id": "dry-run-check",
+              "leftValue": "={{ $vars.DRY_RUN }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "wf4-dry-run-gate",
+      "name": "DRY_RUN Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        272
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "wf4-dry-run-log",
+      "name": "DRY RUN â€” Log Only",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1984,
+        448
+      ],
+      "notes": "In DRY_RUN mode: email is NOT sent. Check n8n execution log to preview what would be sent."
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "sendTo": "={{ $json.contact_email }}",
+        "subject": "={{ $json._send_subject }}",
+        "emailType": "html",
+        "message": "={{ $json._send_body_html }}\n\n<br><br>\n<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#0f172a;line-height:1.6;border-top:1px solid #e2e8f0;padding-top:12px;max-width:480px;\">\n  <strong>Michael Byrne</strong><br>\n  10 Pillars Solutions<br>\n  <a href=\"mailto:michael@10pillarssolutions.com\" style=\"color:#2563eb;text-decoration:none;\">michael@10pillarssolutions.com</a> &nbsp;|&nbsp; <a href=\"tel:9164207006\" style=\"color:#334155;text-decoration:none;\">916-420-7006</a><br>\n  <a href=\"https://www.10pillarssolutions.com\" style=\"color:#2563eb;text-decoration:none;\">www.10pillarssolutions.com</a><br>\n  <span style=\"font-size:11px;color:#64748b;\">AI-Enabled &middot; Human-Led &middot; 25+ Years Experience &nbsp;|&nbsp; CA Certified Small Business #2038866</span>\n</div>\n<br>\n<span style=\"font-size:11px;color:#999;\">If you do not wish to receive any communication please reply with the subject line UNSUBSCRIBE</span>",
+        "options": {
+          "fromEmail": "={{ $vars.GMAIL_SENDER }}",
+          "replyTo": "={{ $vars.GMAIL_SENDER }}",
+          "appendAttributionToBody": false,
+          "attribution": false
+        }
+      },
+      "id": "wf4-send-gmail",
+      "name": "Send via Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1984,
+        272
+      ],
+      "webhookId": "ec0ecccf-a9f6-4962-9663-a63509f3573e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "IYY5ghfJsIOI6umh",
+          "name": "Gmail account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {},
+      "id": "wf4-merge-after-send",
+      "name": "Merge After Send",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 3.2,
+      "position": [
+        2208,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sent Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "opportunity_id": "={{ $('Check Suppression').item.json.opportunity_id }}",
+            "contact_email": "={{ $('Check Suppression').item.json.contact_email }}",
+            "company_domain": "={{ $('Check Suppression').item.json.company_domain }}",
+            "sent_timestamp": "={{ $now.toISO() }}",
+            "email_subject": "={{ $('Prepare Send Fields').item.json._send_subject }}",
+            "follow_up_status": "scheduled"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "opportunity_id",
+              "displayName": "opportunity_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "contact_email",
+              "displayName": "contact_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company_domain",
+              "displayName": "company_domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sent_timestamp",
+              "displayName": "sent_timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_subject",
+              "displayName": "email_subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "follow_up_status",
+              "displayName": "follow_up_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "wf4-write-sent-log",
+      "name": "Write to Sent Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2432,
+        288
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Outreach Queue",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "opportunity_id": "={{ $('Check Suppression').item.json.opportunity_id }}",
+            "sent_status": "sent",
+            "sent_timestamp": "={{ $now.toISO() }}",
+            "contact_email": "={{ $('Check Suppression').item.json.contact_email }}",
+            "follow_up_stage": "={{ $('Check Suppression').item.json.follow_up_stage || '0' }}"
+          },
+          "matchingColumns": [
+            "contact_email",
+            "follow_up_stage"
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf4-update-outreach-sent",
+      "name": "Update Outreach Queue Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2640,
+        288
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Opportunities",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "opportunity_id": "={{ $('Check Suppression').item.json.opportunity_id }}",
+            "status": "sent"
+          },
+          "matchingColumns": [
+            "opportunity_id"
+          ],
+          "schema": [
+            {
+              "id": "opportunity_id",
+              "displayName": "opportunity_id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf4-update-opp-sent",
+      "name": "Update Opportunity to Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2864,
+        288
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Suppression List",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "company_domain": "={{ $('Check Suppression').item.json.company_domain }}",
+            "contact_email": "={{ $('Check Suppression').item.json.contact_email }}",
+            "suppressed_until": "={{ $now.plus({ days: parseInt($vars.DUPLICATE_SUPPRESSION_DAYS || '30') }).toISO() }}",
+            "reason": "Email sent",
+            "added_date": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "wf4-add-suppression",
+      "name": "Add to Suppression List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        3088,
+        288
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {},
+      "id": "wf4-error-handler",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "workflow_name": "WF4: Approved Send",
+            "node_name": "={{ $json.execution.lastNodeExecuted }}",
+            "error_message": "={{ $json.execution.error.message }}",
+            "input_data": "={{ JSON.stringify($json.execution.error.context || {}) }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "wf4-write-error",
+      "name": "Write Error to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        224,
+        720
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "content": "## WF4: Approved Send\n\nSends approved outreach emails. Human must set approval_status='approved' in Outreach Queue tab first.\n\n**Flow:**\n1. Read Outreach Queue: approval_status=approved, sent_status=unsent\n2. Suppression check (30-day dedup window)\n3. DRY_RUN gate â€” set DRY_RUN=true to preview without sending\n4. Send via Gmail\n5. Write to Sent Log\n6. Update Outreach Queue + Opportunities status\n7. Add to Suppression List\n\n**Schedule:** Every 2hrs, Mon-Fri 8am-4pm\n\n**SAFETY:**\n- Set DRY_RUN=true to test\n- No email sent until approval_status=approved\n- Suppression prevents duplicate sends\n\n**Env vars needed:**\n- GOOGLE_SHEETS_ID\n- GMAIL_SENDER\n- DUPLICATE_SUPPRESSION_DAYS\n- DRY_RUN",
+        "height": 360,
+        "width": 280
+      },
+      "id": "wf4-sticky",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        208
+      ]
+    },
+    {
+      "id": "wf4-build-followups",
+      "name": "Build Follow-up Sequence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3312,
+        288
+      ],
+      "parameters": {
+        "jsCode": "// Build follow-up queue entries using pre-generated email content from WF3\n// Stage 1 (email 2): triggered when stage 0 sends — 3 business days out\n// Stage 2 (email 3): triggered when stage 1 sends — 7 calendar days out\n\nconst results = [];\nconst now = new Date();\n\nconst addCalendarDays = (d, n) => {\n  const r = new Date(d);\n  r.setDate(r.getDate() + n);\n  return r.toISOString().split('T')[0];\n};\n\nconst addBusinessDays = (d, n) => {\n  const r = new Date(d);\n  let added = 0;\n  while (added < n) {\n    r.setDate(r.getDate() + 1);\n    const dow = r.getDay();\n    if (dow !== 0 && dow !== 6) added++; // skip weekends\n  }\n  return r.toISOString().split('T')[0];\n};\n\nconst allItems = $('Prepare Send Fields').all();\n\nfor (const item of allItems) {\n  const data = item.json;\n  const stage = parseInt(data.follow_up_stage || '0');\n\n  if (stage === 0) {\n    // Email 1 just sent — queue Email 2 for 3 business days from now\n    results.push({ json: {\n      opportunity_id: data.opportunity_id || '',\n      contact_email: data.contact_email || '',\n      contact_name: data.contact_name || '',\n      company_name: data.company_name || '',\n      company_domain: data.company_domain || '',\n      job_title: data.job_title || '',\n      location: data.location || '',\n      email_1_subject: data.email_1_subject || '',\n      email_1_body: data.email_1_body || '',\n      email_2_subject: data.email_2_subject || '',\n      email_2_body: data.email_2_body || '',\n      email_3_subject: data.email_3_subject || '',\n      email_3_body: data.email_3_body || '',\n      email_body: data.email_2_body || '',          // what Prepare Send Fields reads\n      approval_status: 'approved',\n      sent_status: 'unsent',\n      follow_up_stage: 1,\n      scheduled_date: addBusinessDays(now, 3),\n      posted_date: data.posted_date || '',\n      source_url: data.source_url || ''\n    }});\n\n  } else if (stage === 1) {\n    // Email 2 just sent — queue Email 3 for 7 calendar days from now\n    results.push({ json: {\n      opportunity_id: data.opportunity_id || '',\n      contact_email: data.contact_email || '',\n      contact_name: data.contact_name || '',\n      company_name: data.company_name || '',\n      company_domain: data.company_domain || '',\n      job_title: data.job_title || '',\n      location: data.location || '',\n      email_1_subject: data.email_1_subject || '',\n      email_1_body: data.email_1_body || '',\n      email_2_subject: data.email_2_subject || '',\n      email_2_body: data.email_2_body || '',\n      email_3_subject: data.email_3_subject || '',\n      email_3_body: data.email_3_body || '',\n      email_body: data.email_3_body || '',          // what Prepare Send Fields reads\n      approval_status: 'approved',\n      sent_status: 'unsent',\n      follow_up_stage: 2,\n      scheduled_date: addCalendarDays(now, 7),\n      posted_date: data.posted_date || '',\n      source_url: data.source_url || ''\n    }});\n  }\n  // stage 2 (email 3) — no further follow-ups\n}\n\nreturn results;"
+      }
+    },
+    {
+      "id": "wf4-write-followups",
+      "name": "Write Follow-ups to Queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        3536,
+        288
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Outreach Queue",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "opportunity_id": "={{ $json.opportunity_id }}",
+            "contact_email": "={{ $json.contact_email }}",
+            "contact_name": "={{ $json.contact_name }}",
+            "company_name": "={{ $json.company_name }}",
+            "job_title": "={{ $json.job_title }}",
+            "location": "={{ $json.location }}",
+            "email_subject": "={{ $json.email_subject }}",
+            "email_body": "={{ $json.email_body }}",
+            "approval_status": "={{ $json.approval_status }}",
+            "sent_status": "={{ $json.sent_status }}",
+            "follow_up_stage": "={{ $json.follow_up_stage }}",
+            "scheduled_date": "={{ $json.scheduled_date }}",
+            "posted_date": "={{ $json.posted_date }}",
+            "source_url": "={{ $json.source_url }}"
+          },
+          "matchingColumns": [
+            "opportunity_id",
+            "follow_up_stage"
+          ],
+          "schema": [
+            {
+              "id": "opportunity_id",
+              "displayName": "opportunity_id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "follow_up_stage",
+              "displayName": "follow_up_stage",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "contact_email",
+              "displayName": "contact_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "contact_name",
+              "displayName": "contact_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company_name",
+              "displayName": "company_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_subject",
+              "displayName": "email_subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_body",
+              "displayName": "email_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "approval_status",
+              "displayName": "approval_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sent_status",
+              "displayName": "sent_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "scheduled_date",
+              "displayName": "scheduled_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "job_title",
+              "displayName": "job_title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "location",
+              "displayName": "location",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "posted_date",
+              "displayName": "posted_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_url",
+              "displayName": "source_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "id": "wf4-prepare-send-fields",
+      "name": "Prepare Send Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1656,
+        272
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const d = item.json;\n  const stage = parseInt(d.follow_up_stage || '0');\n  let sendSubject, sendBody;\n\n  if (stage === 0) {\n    // Email 1 — original send\n    sendSubject = d.email_1_subject || '';\n    sendBody = d.email_1_body || '';\n  } else {\n    // Emails 2 and 3 — reply chain using Re: prefix on original subject\n    sendSubject = 'Re: ' + (d.email_1_subject || d.company_name || '');\n    if (stage === 1) {\n      sendBody = d.email_2_body || '';\n    } else {\n      sendBody = d.email_3_body || '';\n    }\n  }\n\n  // Strip any embedded unsubscribe line\n  sendBody = sendBody.replace(/\\n?If you do not wish to receive any communication please reply with the subject line UNSUBSCRIBE/gi, '').trim();\n\n  // Convert newlines to <br> for HTML email rendering\n  const sendBodyHtml = sendBody.replace(/\\n/g, '<br>');\n\n  return { json: { ...d, _send_subject: sendSubject, _send_body: sendBody, _send_body_html: sendBodyHtml } };\n});"
+      }
+    }
+  ],
+  "connections": {
+    "Read Approved Rows": {
+      "main": [
+        [
+          {
+            "node": "Any Approved Rows?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Approved Rows?": {
+      "main": [
+        [
+          {
+            "node": "Read Suppression List",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Rows to Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Suppression List": {
+      "main": [
+        [
+          {
+            "node": "Attach Suppression List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Suppression List": {
+      "main": [
+        [
+          {
+            "node": "Check Suppression",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Suppression": {
+      "main": [
+        [
+          {
+            "node": "Suppression Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Suppression Gate": {
+      "main": [
+        [
+          {
+            "node": "Prepare Send Fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Suppressed (Skip)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DRY_RUN Gate": {
+      "main": [
+        [
+          {
+            "node": "Send via Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DRY RUN â€” Log Only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send via Gmail": {
+      "main": [
+        [
+          {
+            "node": "Merge After Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DRY RUN â€” Log Only": {
+      "main": [
+        [
+          {
+            "node": "Merge After Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge After Send": {
+      "main": [
+        [
+          {
+            "node": "Write to Sent Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write to Sent Log": {
+      "main": [
+        [
+          {
+            "node": "Update Outreach Queue Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Outreach Queue Sent": {
+      "main": [
+        [
+          {
+            "node": "Update Opportunity to Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Opportunity to Sent": {
+      "main": [
+        [
+          {
+            "node": "Add to Suppression List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Handler": {
+      "main": [
+        [
+          {
+            "node": "Write Error to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Approved Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Approved Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add to Suppression List": {
+      "main": [
+        [
+          {
+            "node": "Build Follow-up Sequence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Follow-up Sequence": {
+      "main": [
+        [
+          {
+            "node": "Write Follow-ups to Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Send Fields": {
+      "main": [
+        [
+          {
+            "node": "DRY_RUN Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "binaryMode": "separate"
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    }
+  },
+  "pinData": {}
+}

@@ -1,0 +1,133 @@
+{
+  "status": "OK",
+  "request_id": "test-request-001",
+  "parameters": {
+    "query": "Software Engineer",
+    "location": "Austin, TX",
+    "employment_types": "FULLTIME",
+    "date_posted": "3days"
+  },
+  "data": [
+    {
+      "job_id": "test_job_001",
+      "employer_name": "Acme FinTech Inc",
+      "employer_logo": "https://example.com/acme-logo.png",
+      "employer_website": "https://www.acmefintech.com",
+      "employer_company_type": "Direct Employer",
+      "job_publisher": "LinkedIn",
+      "job_employment_type": "FULLTIME",
+      "job_title": "Senior Software Engineer",
+      "job_apply_link": "https://www.acmefintech.com/careers/senior-swe",
+      "job_google_link": "https://www.google.com/search?q=senior+software+engineer+acme+fintech",
+      "job_description": "Acme FinTech is looking for a Senior Software Engineer to join our growing payments infrastructure team. You will be responsible for building scalable backend services that process millions of transactions daily.\n\nWe are a Series B company with 150 engineers and we are growing the team aggressively as we expand into new markets.\n\nResponsibilities:\n- Design and build high-throughput payment processing systems\n- Lead technical design reviews\n- Mentor junior engineers\n- Collaborate with product and design teams\n\nRequirements:\n- 5+ years of software engineering experience\n- Strong proficiency in Go or Python\n- Experience with distributed systems\n- AWS experience required (EKS, Lambda, RDS)\n- Experience with Kafka or similar message queues\n- Bachelor's degree in Computer Science or equivalent\n\nNice to have:\n- Experience in fintech or payments\n- Kubernetes expertise\n- PostgreSQL at scale\n\nBenefits:\n- Competitive salary ($160k-$200k)\n- Equity package\n- Remote-friendly (Austin HQ)\n- Health, dental, vision",
+      "job_is_remote": false,
+      "job_posted_at_datetime_utc": "2026-03-24T09:00:00.000Z",
+      "job_city": "Austin",
+      "job_state": "TX",
+      "job_country": "US",
+      "job_latitude": 30.2672,
+      "job_longitude": -97.7431,
+      "job_min_salary": 160000,
+      "job_max_salary": 200000,
+      "job_salary_currency": "USD",
+      "job_salary_period": "YEAR",
+      "job_highlights": {
+        "Qualifications": [
+          "5+ years of software engineering experience",
+          "Strong proficiency in Go or Python",
+          "Experience with distributed systems",
+          "AWS experience required"
+        ],
+        "Responsibilities": [
+          "Design and build high-throughput payment processing systems",
+          "Lead technical design reviews",
+          "Mentor junior engineers"
+        ],
+        "Benefits": [
+          "Competitive salary ($160k-$200k)",
+          "Equity package",
+          "Remote-friendly (Austin HQ)"
+        ]
+      },
+      "job_required_experience": {
+        "no_experience_required": false,
+        "required_experience_in_months": 60,
+        "experience_mentioned": true,
+        "experience_preferred": false
+      }
+    },
+    {
+      "job_id": "test_job_002",
+      "employer_name": "RetailEdge Systems",
+      "employer_logo": null,
+      "employer_website": "https://www.retailedge.io",
+      "employer_company_type": "Direct Employer",
+      "job_publisher": "Indeed",
+      "job_employment_type": "FULLTIME",
+      "job_title": "Staff Engineer - Platform",
+      "job_apply_link": "https://jobs.retailedge.io/staff-engineer-platform",
+      "job_google_link": "",
+      "job_description": "RetailEdge Systems is a fast-growing retail technology company that helps mid-market retailers compete with big-box stores through better data and automation.\n\nWe are looking for a Staff Engineer to lead our platform engineering efforts. This is a high-impact role where you will set the technical direction for our core infrastructure.\n\nYou will be working on:\n- Building a multi-tenant SaaS platform serving 500+ retailers\n- Improving developer experience and internal tooling\n- Defining and evolving engineering standards\n- Partnering with VPs and directors on roadmap\n\nRequired skills:\n- 8+ years of software engineering\n- Experience with TypeScript/Node.js at scale\n- Strong knowledge of cloud infrastructure (AWS preferred)\n- Experience with microservices and API design\n- Track record of technical leadership\n\nWe offer:\n- $180k-$230k base\n- Meaningful equity\n- Fully remote with optional Austin office",
+      "job_is_remote": true,
+      "job_posted_at_datetime_utc": "2026-03-25T14:00:00.000Z",
+      "job_city": "Austin",
+      "job_state": "TX",
+      "job_country": "US",
+      "job_latitude": 30.2672,
+      "job_longitude": -97.7431,
+      "job_min_salary": 180000,
+      "job_max_salary": 230000,
+      "job_salary_currency": "USD",
+      "job_salary_period": "YEAR",
+      "job_highlights": {
+        "Qualifications": [
+          "8+ years of software engineering",
+          "TypeScript/Node.js at scale",
+          "Cloud infrastructure (AWS)"
+        ],
+        "Responsibilities": [
+          "Lead platform engineering efforts",
+          "Define engineering standards",
+          "Partner with VPs and directors on roadmap"
+        ]
+      },
+      "job_required_experience": {
+        "no_experience_required": false,
+        "required_experience_in_months": 96,
+        "experience_mentioned": true,
+        "experience_preferred": false
+      }
+    },
+    {
+      "job_id": "test_job_003_staffing_should_be_filtered",
+      "employer_name": "TalentBridge Staffing Solutions",
+      "employer_logo": null,
+      "employer_website": "https://www.talentbridge-staffing.com",
+      "employer_company_type": "Staffing",
+      "job_publisher": "ZipRecruiter",
+      "job_employment_type": "FULLTIME",
+      "job_title": "Software Engineer (Contract-to-Hire)",
+      "job_apply_link": "https://www.talentbridge-staffing.com/apply/swe-cth",
+      "job_google_link": "",
+      "job_description": "TalentBridge Staffing Solutions is looking to place a Software Engineer with one of our Fortune 500 clients. This is a contract-to-hire opportunity with potential for full-time conversion.\n\nOur client is a leading financial services company looking for a strong backend engineer.\n\nRequirements:\n- 3+ years of Java or Python experience\n- Experience with REST APIs\n- Nice to have: Spring Boot\n\nTo apply, submit your resume and our recruiting team will be in touch.",
+      "job_is_remote": false,
+      "job_posted_at_datetime_utc": "2026-03-23T10:00:00.000Z",
+      "job_city": "Austin",
+      "job_state": "TX",
+      "job_country": "US",
+      "job_latitude": 30.2672,
+      "job_longitude": -97.7431,
+      "job_min_salary": null,
+      "job_max_salary": null,
+      "job_highlights": {
+        "Qualifications": ["3+ years of Java or Python"]
+      },
+      "job_required_experience": {
+        "no_experience_required": false,
+        "required_experience_in_months": 36,
+        "experience_mentioned": true,
+        "experience_preferred": false
+      }
+    }
+  ]
+}

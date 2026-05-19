@@ -1,0 +1,1052 @@
+[
+  {
+    "parameters": {},
+    "id": "wf2-trigger-exec",
+    "name": "Execute Workflow Trigger",
+    "type": "n8n-nodes-base.executeWorkflowTrigger",
+    "typeVersion": 1,
+    "position": [
+      0,
+      304
+    ],
+    "disabled": true
+  },
+  {
+    "parameters": {},
+    "id": "wf2-trigger-manual",
+    "name": "Manual Trigger",
+    "type": "n8n-nodes-base.manualTrigger",
+    "typeVersion": 1,
+    "position": [
+      0,
+      512
+    ]
+  },
+  {
+    "parameters": {
+      "url": "=https://company.clearbit.com/v2/companies/find?domain={{ encodeURIComponent($json.company_domain) }}",
+      "sendHeaders": true,
+      "headerParameters": {
+        "parameters": [
+          {
+            "name": "Authorization",
+            "value": "=Bearer {{ $vars.CLEARBIT_API_KEY }}"
+          }
+        ]
+      },
+      "options": {
+        "response": {
+          "response": {
+            "neverError": true
+          }
+        }
+      }
+    },
+    "id": "wf2-clearbit",
+    "name": "Clearbit Company Enrichment",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4,
+    "position": [
+      448,
+      384
+    ],
+    "continueOnFail": true
+  },
+  {
+    "parameters": {
+      "jsCode": "const results = [];\nconst originalItems = $('Preserve Opportunity Data').all();\n\nfor (let i = 0; i < $input.all().length; i++) {\n  const cb = $input.all()[i].json;\n  const orig = originalItems[i] ? originalItems[i].json : {};\n  const clearbitOk = !!cb.name;\n\n  results.push({ json: {\n    opportunity_id: orig.opportunity_id || '',\n    company_name: (clearbitOk ? cb.name : null) || orig.company_name || '',\n    company_domain: (clearbitOk ? cb.domain : null) || orig.company_domain || '',\n    job_title: orig.job_title || '',\n    job_description: orig.job_description || '',\n    location: orig.location || '',\n    seniority: orig.seniority || '',\n    skills: orig.skills || '',\n    match_score: orig.match_score || '',\n    source_url: orig.source_url || '',\n    source_name: orig.source_name || '',\n    employment_type: orig.employment_type || '',\n    posted_date: orig.posted_date || '',\n    date_found: orig.date_found || '',\n    company_classification: orig.company_classification || '',\n    company_classification_reason: orig.company_classification_reason || '',\n    status: orig.status || '',\n    company_summary: clearbitOk ? (cb.description || '').substring(0, 500) : '',\n    company_industry: clearbitOk ? (cb.category?.industry || cb.category?.sector || '') : '',\n    company_employee_count: clearbitOk ? (cb.metrics?.employees || 0) : 0,\n    company_annual_revenue: clearbitOk ? (cb.metrics?.annualRevenue || 0) : 0,\n    _clearbit_success: clearbitOk\n  }});\n}\nreturn results;"
+    },
+    "id": "wf2-merge-clearbit",
+    "name": "Merge Company Data",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      672,
+      384
+    ]
+  },
+  {
+    "parameters": {
+      "jsCode": "const results = [];\nconst TITLE_PRIORITY = {\n  engineering: ['Engineering Manager', 'Director of Engineering', 'VP of Engineering', 'VP Engineering', 'CTO', 'Head of Engineering', 'Tech Lead Manager', 'Software Development Manager', 'Principal Engineer'],\n  data: ['Director of Data', 'VP of Data', 'Head of Data', 'Data Engineering Manager', 'Director of Analytics', 'VP Analytics', 'Chief Data Officer'],\n  product: ['VP of Product', 'Director of Product', 'Head of Product', 'CPO', 'Product Director', 'VP Product Management'],\n  operations: ['COO', 'VP Operations', 'Director of Operations', 'Head of Operations', 'Operations Director'],\n  finance: ['CFO', 'VP Finance', 'Director of Finance', 'Controller', 'Head of Finance'],\n  default: ['Director', 'VP', 'Vice President', 'Head of', 'Department Head', 'Talent Acquisition Manager', 'Recruiting Manager', 'HR Manager']\n};\n\nconst MAX_ANNUAL_REVENUE = 100000000;\nconst MAX_EMPLOYEES = 1000;\n\nfor (const item of $input.all()) {\n  const job = { ...item.json };\n  const revenue = job.company_annual_revenue || 0;\n  const employees = job.company_employee_count || 0;\n  if (revenue > 0 && revenue > MAX_ANNUAL_REVENUE) continue;\n  if (revenue === 0 && employees > MAX_EMPLOYEES) continue;\n\n  const titleLower = (job.job_title || '').toLowerCase();\n  const descLower = (job.job_description || '').toLowerCase();\n  let domain = 'default';\n  if (/engineer|developer|devops|sre|platform|infrastructure/.test(titleLower)) domain = 'engineering';\n  else if (/data|analytics|ml|machine learning|ai/.test(titleLower)) domain = 'data';\n  else if (/product|ux|design/.test(titleLower)) domain = 'product';\n  else if (/operations|ops/.test(titleLower)) domain = 'operations';\n  else if (/finance|accounting|financial/.test(titleLower)) domain = 'finance';\n\n  job._title_priority = [...(TITLE_PRIORITY[domain] || []), ...TITLE_PRIORITY.default];\n  job._hiring_signals = [];\n  if (/growing|scaling|hypergrowth|series [a-e]|recently funded/.test(descLower)) job._hiring_signals.push('Company in growth phase');\n  if (/remote|hybrid|work from home/.test(descLower)) job._hiring_signals.push('Offers remote/hybrid work');\n  if (/urgent|immediate|asap|start immediately/.test(descLower)) job._hiring_signals.push('Urgent hire needed');\n  if (/contract|c2h|contract.to.hire/.test(descLower)) job._hiring_signals.push('Open to contract/C2H');\n  job._tech_stack = ['react','node','python','java','go','rust','typescript','kubernetes','aws','azure','gcp','terraform','postgres','mysql','mongodb'].filter(t => descLower.includes(t));\n  job._role_domain = domain;\n  results.push({ json: job });\n}\nreturn results;"
+    },
+    "id": "wf2-hiring-signals",
+    "name": "Extract Hiring Signals",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      880,
+      384
+    ]
+  },
+  {
+    "parameters": {
+      "url": "={{ $json.company_domain ? 'https://api.hunter.io/v2/domain-search?domain=' + encodeURIComponent($json.company_domain) + '&limit=20&offset=' + ($json.hunter_offset || 0) + '&api_key=' + $vars.HUNTER_API_KEY : 'https://api.hunter.io/v2/domain-search?company=' + encodeURIComponent($json.company_name) + '&limit=20&offset=' + ($json.hunter_offset || 0) + '&api_key=' + $vars.HUNTER_API_KEY }}",
+      "options": {
+        "response": {
+          "response": {
+            "neverError": true
+          }
+        }
+      }
+    },
+    "id": "wf2-hunter-search",
+    "name": "Hunter.io Domain Search",
+    "type": "n8n-nodes-base.httpRequest",
+    "typeVersion": 4,
+    "position": [
+      1104,
+      384
+    ],
+    "continueOnFail": true
+  },
+  {
+    "parameters": {
+      "jsCode": "const opportunityItems = $('Compute Hunter Offset').all();\nconst results = [];\n\nfor (let idx = 0; idx < $input.all().length; idx++) {\n  const hunterData = $input.all()[idx].json;\n  const opportunity = opportunityItems[idx] ? opportunityItems[idx].json : {};\n  const emails = hunterData.data?.emails || [];\n  const titlePriority = opportunity._title_priority || [];\n\n  if (emails.length === 0) {\n    results.push({ json: {\n      ...opportunity,\n      contact_name: '', contact_title: '', contact_email: '', contact_phone: '', linkedin_url: '',\n      source_of_contact: opportunity.company_domain ? 'hunter.io (no results)' : 'hunter.io (no domain)',\n      confidence_score: 0,\n      contact_reasoning: 'No contacts found via Hunter.io domain search'\n    }});\n    continue;\n  }\n\n  const scored = emails.map(email => {\n    let score = 30;\n    const title = (email.position || '').toLowerCase();\n    for (let i = 0; i < titlePriority.length; i++) {\n      if (title.includes(titlePriority[i].toLowerCase())) { score += Math.max(10, 50 - i * 5); break; }\n    }\n    if (email.confidence) score += Math.floor(email.confidence / 10);\n    if (['director','vp','head','manager'].some(t => title.includes(t))) score += 10;\n    return { ...email, _score: score };\n  });\n  scored.sort((a, b) => b._score - a._score);\n  const best = scored[0];\n\n  results.push({ json: {\n    ...opportunity,\n    contact_name: `${best.first_name || ''} ${best.last_name || ''}`.trim(),\n    contact_title: best.position || '',\n    contact_email: best.value || '',\n    contact_phone: '',\n    linkedin_url: best.linkedin || '',\n    source_of_contact: 'hunter.io',\n    confidence_score: best._score,\n    contact_reasoning: `Best match from ${emails.length} contacts: title score + Hunter confidence ${best.confidence || 0}%`\n  }});\n}\nreturn results;"
+    },
+    "id": "wf2-score-contacts",
+    "name": "Score & Rank Contacts",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      1328,
+      384
+    ]
+  },
+  {
+    "parameters": {
+      "conditions": {
+        "options": {
+          "caseSensitive": false
+        },
+        "conditions": [
+          {
+            "id": "conf-check",
+            "leftValue": "={{ $json.confidence_score }}",
+            "rightValue": 70,
+            "operator": {
+              "type": "number",
+              "operation": "gte"
+            }
+          }
+        ],
+        "combinator": "and"
+      },
+      "options": {}
+    },
+    "id": "wf2-confidence-gate",
+    "name": "Confidence Gate",
+    "type": "n8n-nodes-base.if",
+    "typeVersion": 2,
+    "position": [
+      1552,
+      384
+    ]
+  },
+  {
+    "parameters": {},
+    "id": "wf2-merge-contact-paths",
+    "name": "Merge Contact Paths",
+    "type": "n8n-nodes-base.merge",
+    "typeVersion": 3.2,
+    "position": [
+      1984,
+      384
+    ]
+  },
+  {
+    "parameters": {
+      "operation": "append",
+      "documentId": {
+        "__rl": true,
+        "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+        "mode": "id"
+      },
+      "sheetName": {
+        "__rl": true,
+        "value": "Contacts",
+        "mode": "name"
+      },
+      "columns": {
+        "mappingMode": "defineBelow",
+        "value": {
+          "opportunity_id": "={{ $json.opportunity_id }}",
+          "company_name": "={{ $json.company_name }}",
+          "contact_name": "={{ $json.contact_name }}",
+          "contact_title": "={{ $json.contact_title }}",
+          "contact_email": "={{ $json.contact_email }}",
+          "hunter_confidence": "={{ $json.confidence_score }}",
+          "linkedin_url": "={{ $json.linkedin_url }}",
+          "found_date": "={{ $now.toISODate() }}"
+        },
+        "matchingColumns": [],
+        "schema": [
+          {
+            "id": "opportunity_id",
+            "displayName": "opportunity_id",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": true
+          },
+          {
+            "id": "company_name",
+            "displayName": "company_name",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": false
+          },
+          {
+            "id": "contact_name",
+            "displayName": "contact_name",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": false
+          },
+          {
+            "id": "contact_title",
+            "displayName": "contact_title",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": false
+          },
+          {
+            "id": "contact_email",
+            "displayName": "contact_email",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": false
+          },
+          {
+            "id": "hunter_confidence",
+            "displayName": "hunter_confidence",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "number",
+            "canBeUsedToMatch": false
+          },
+          {
+            "id": "linkedin_url",
+            "displayName": "linkedin_url",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": false
+          },
+          {
+            "id": "found_date",
+            "displayName": "found_date",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": false
+          }
+        ]
+      },
+      "options": {}
+    },
+    "id": "wf2-write-contacts",
+    "name": "Write to Contacts Sheet",
+    "type": "n8n-nodes-base.googleSheets",
+    "typeVersion": 4,
+    "position": [
+      2208,
+      384
+    ],
+    "credentials": {
+      "googleSheetsOAuth2Api": {
+        "id": "7dIWwoowtD1RTjmu",
+        "name": "Google Sheets account"
+      }
+    }
+  },
+  {
+    "parameters": {
+      "jsCode": "return $input.all().filter(item => \n  !!item.json.opportunity_id &&\n  !!item.json.contact_email &&\n  (item.json.confidence_score || item.json.hunter_confidence || 0) >= 70\n);"
+    },
+    "id": "wf2-filter-valid-opp",
+    "name": "Filter Valid Opportunity ID",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      2320,
+      384
+    ]
+  },
+  {
+    "parameters": {
+      "operation": "appendOrUpdate",
+      "documentId": {
+        "__rl": true,
+        "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+        "mode": "id"
+      },
+      "sheetName": {
+        "__rl": true,
+        "value": "Opportunities",
+        "mode": "name"
+      },
+      "columns": {
+        "mappingMode": "defineBelow",
+        "value": {
+          "opportunity_id": "={{ $json.opportunity_id }}",
+          "status": "contact_found",
+          "company_summary": "={{ $json.company_summary }}"
+        },
+        "matchingColumns": [
+          "opportunity_id"
+        ],
+        "schema": [
+          {
+            "id": "opportunity_id",
+            "displayName": "opportunity_id",
+            "required": false,
+            "defaultMatch": true,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": true
+          },
+          {
+            "id": "status",
+            "displayName": "status",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": true
+          },
+          {
+            "id": "company_summary",
+            "displayName": "company_summary",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": true
+          }
+        ]
+      },
+      "options": {}
+    },
+    "id": "wf2-update-opp-status",
+    "name": "Update Opportunity Status",
+    "type": "n8n-nodes-base.googleSheets",
+    "typeVersion": 4,
+    "position": [
+      2544,
+      384
+    ],
+    "credentials": {
+      "googleSheetsOAuth2Api": {
+        "id": "7dIWwoowtD1RTjmu",
+        "name": "Google Sheets account"
+      }
+    }
+  },
+  {
+    "parameters": {},
+    "id": "wf2-error-handler",
+    "name": "Error Handler",
+    "type": "n8n-nodes-base.errorTrigger",
+    "typeVersion": 1,
+    "position": [
+      0,
+      720
+    ]
+  },
+  {
+    "parameters": {
+      "operation": "append",
+      "documentId": {
+        "__rl": true,
+        "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+        "mode": "id"
+      },
+      "sheetName": {
+        "__rl": true,
+        "value": "Errors",
+        "mode": "name"
+      },
+      "columns": {
+        "mappingMode": "defineBelow",
+        "value": {
+          "workflow_name": "WF2: Contact Discovery",
+          "node_name": "={{ $json.execution.lastNodeExecuted }}",
+          "error_message": "={{ $json.execution.error.message }}",
+          "input_data": "={{ JSON.stringify($json.execution.error.context || {}) }}"
+        },
+        "matchingColumns": [],
+        "schema": [
+          {
+            "id": "timestamp ",
+            "displayName": "timestamp ",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": true
+          },
+          {
+            "id": "workflow_name",
+            "displayName": "workflow_name",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": true
+          },
+          {
+            "id": "node_name",
+            "displayName": "node_name",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": true
+          },
+          {
+            "id": "error_message",
+            "displayName": "error_message",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": true
+          },
+          {
+            "id": "input_data",
+            "displayName": "input_data",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": true
+          }
+        ],
+        "attemptToConvertTypes": false,
+        "convertFieldsToString": false
+      },
+      "options": {}
+    },
+    "id": "wf2-write-error",
+    "name": "Write Error to Sheet",
+    "type": "n8n-nodes-base.googleSheets",
+    "typeVersion": 4,
+    "position": [
+      224,
+      720
+    ],
+    "credentials": {
+      "googleSheetsOAuth2Api": {
+        "id": "7dIWwoowtD1RTjmu",
+        "name": "Google Sheets account"
+      }
+    }
+  },
+  {
+    "parameters": {
+      "content": "## WF2: Contact Discovery\n\n**Main Flow**: Read Approved -> Preserve -> Clearbit -> Merge -> Extract Signals -> Read All Contacts (alwaysOutputData) -> Compute Hunter Offset -> Hunter.io (with offset) -> Score & Rank -> Confidence Gate -> Write Contacts -> Update Opportunity -> WF3\n\n**Archive Branch**: Schedule only - archives unchecked rows after 2 days.\n**Reject Branch**: Manual trigger - archives + deletes rows marked 'reject'.\n\n**Offset logic**: Read All Contacts has alwaysOutputData=true so empty Contacts tab still passes 1 placeholder item. Compute Hunter Offset filters it out and outputs N items (1 per opportunity) with correct hunter_offset."
+    },
+    "id": "wf2-sticky",
+    "name": "Sticky Note",
+    "type": "n8n-nodes-base.stickyNote",
+    "typeVersion": 1,
+    "position": [
+      -208,
+      208
+    ]
+  },
+  {
+    "parameters": {
+      "workflowId": "T1jTXreAw0uZ2TOD",
+      "options": {}
+    },
+    "id": "wf2-trigger-outreach",
+    "name": "Trigger Outreach Draft",
+    "type": "n8n-nodes-base.executeWorkflow",
+    "typeVersion": 1,
+    "position": [
+      2848,
+      288
+    ]
+  },
+  {
+    "parameters": {
+      "jsCode": "function isApproved(v) {\n  if (!v && v !== 0) return false;\n  if (v === true || v === 1) return true;\n  const s = String(v).trim().toLowerCase();\n  return ['true', 'approved', 'yes', '1'].includes(s);\n}\n\nreturn $input.all()\n  .filter(item => isApproved(item.json.approved))\n  .map(item => ({ json: { ...item.json } }));"
+    },
+    "id": "wf2-preserve-opportunity",
+    "name": "Preserve Opportunity Data",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      224,
+      400
+    ]
+  },
+  {
+    "parameters": {
+      "jsCode": "return $input.all().map(item => ({\n  json: { ...item.json, contact_status: 'contact_found' }\n}));"
+    },
+    "id": "wf2-set-contact-found",
+    "name": "Set Contact Found",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      1760,
+      288
+    ]
+  },
+  {
+    "parameters": {
+      "jsCode": "return $input.all().map(item => ({\n  json: { ...item.json, contact_status: 'needs_review' }\n}));"
+    },
+    "id": "wf2-set-needs-review",
+    "name": "Set Needs Review",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      1760,
+      512
+    ]
+  },
+  {
+    "parameters": {
+      "jsCode": "const allContacts = $('Score & Rank Contacts').all();\n\nreturn $input.all().map((item) => {\n  const oppId = item.json.opportunity_id;\n  const full = allContacts.find(c => c.json.opportunity_id === oppId);\n  return { json: { ...(full ? full.json : {}), ...item.json } };\n});"
+    },
+    "id": "wf2-prepare-wf3-payload",
+    "name": "Prepare WF3 Payload",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      2640,
+      288
+    ]
+  },
+  {
+    "parameters": {
+      "rule": {
+        "interval": [
+          {
+            "field": "cronExpression",
+            "expression": "0 19 * * 1-5"
+          }
+        ]
+      }
+    },
+    "id": "wf2-trigger-schedule",
+    "name": "Schedule Trigger",
+    "type": "n8n-nodes-base.scheduleTrigger",
+    "typeVersion": 1,
+    "position": [
+      0,
+      112
+    ]
+  },
+  {
+    "parameters": {
+      "documentId": {
+        "__rl": true,
+        "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+        "mode": "id"
+      },
+      "sheetName": {
+        "__rl": true,
+        "value": "Opportunities",
+        "mode": "name"
+      },
+      "filtersUI": {
+        "values": []
+      },
+      "options": {},
+      "combineFilters": "AND"
+    },
+    "id": "wf2-read-approved",
+    "name": "Read Approved Opportunities",
+    "type": "n8n-nodes-base.googleSheets",
+    "typeVersion": 4,
+    "position": [
+      224,
+      208
+    ],
+    "credentials": {
+      "googleSheetsOAuth2Api": {
+        "id": "7dIWwoowtD1RTjmu",
+        "name": "Google Sheets account"
+      }
+    }
+  },
+  {
+    "parameters": {
+      "documentId": {
+        "__rl": true,
+        "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+        "mode": "id"
+      },
+      "sheetName": {
+        "__rl": true,
+        "value": "Opportunities",
+        "mode": "name"
+      },
+      "filtersUI": {
+        "values": []
+      },
+      "options": {}
+    },
+    "id": "wf2-read-unchecked",
+    "name": "Read Unchecked Opportunities",
+    "type": "n8n-nodes-base.googleSheets",
+    "typeVersion": 4,
+    "position": [
+      224,
+      704
+    ],
+    "credentials": {
+      "googleSheetsOAuth2Api": {
+        "id": "7dIWwoowtD1RTjmu",
+        "name": "Google Sheets account"
+      }
+    }
+  },
+  {
+    "parameters": {
+      "jsCode": "const cutoff = new Date();\ncutoff.setDate(cutoff.getDate() - 2);\nconst cutoffStr = cutoff.toISOString().split('T')[0];\n\nfunction isApproved(v) {\n  if (!v && v !== 0) return false;\n  if (v === true || v === 1) return true;\n  const s = String(v).trim().toLowerCase();\n  return ['true', 'approved', 'yes', '1'].includes(s);\n}\n\nfunction isRejected(v) {\n  const s = String(v || '').trim().toLowerCase();\n  return s === 'reject' || s === 'rejected';\n}\n\nreturn $input.all().filter(item => {\n  const approved = item.json.approved;\n  const addedDate = item.json.added_date || '';\n  return !isApproved(approved) && !isRejected(approved) && addedDate && addedDate <= cutoffStr;\n});"
+    },
+    "id": "wf2-filter-old-unchecked",
+    "name": "Filter Older Than 2 Days",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      448,
+      704
+    ]
+  },
+  {
+    "parameters": {
+      "jsCode": "return $input.all().map(item => ({\n  json: { ...item.json, archived_reason: 'not_approved' }\n}));"
+    },
+    "id": "wf2-prep-archive",
+    "name": "Prep Archive Row",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      672,
+      704
+    ]
+  },
+  {
+    "parameters": {
+      "operation": "append",
+      "documentId": {
+        "__rl": true,
+        "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+        "mode": "id"
+      },
+      "sheetName": {
+        "__rl": true,
+        "value": "Archive",
+        "mode": "name"
+      },
+      "columns": {
+        "mappingMode": "autoMapInputData",
+        "value": {},
+        "matchingColumns": [],
+        "schema": []
+      },
+      "options": {}
+    },
+    "id": "wf2-archive-unchecked",
+    "name": "Archive Unchecked Opportunities",
+    "type": "n8n-nodes-base.googleSheets",
+    "typeVersion": 4,
+    "position": [
+      896,
+      704
+    ],
+    "credentials": {
+      "googleSheetsOAuth2Api": {
+        "id": "7dIWwoowtD1RTjmu",
+        "name": "Google Sheets account"
+      }
+    }
+  },
+  {
+    "parameters": {
+      "operation": "appendOrUpdate",
+      "documentId": {
+        "__rl": true,
+        "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+        "mode": "id"
+      },
+      "sheetName": {
+        "__rl": true,
+        "value": "Opportunities",
+        "mode": "name"
+      },
+      "columns": {
+        "mappingMode": "defineBelow",
+        "value": {
+          "opportunity_id": "={{ $json.opportunity_id }}",
+          "status": "archived"
+        },
+        "matchingColumns": [
+          "opportunity_id"
+        ],
+        "schema": [
+          {
+            "id": "opportunity_id",
+            "displayName": "opportunity_id",
+            "required": false,
+            "defaultMatch": true,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": true
+          },
+          {
+            "id": "status",
+            "displayName": "status",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": false
+          }
+        ]
+      },
+      "options": {}
+    },
+    "id": "wf2-mark-archived",
+    "name": "Mark Archived in Opportunities",
+    "type": "n8n-nodes-base.googleSheets",
+    "typeVersion": 4,
+    "position": [
+      1120,
+      704
+    ],
+    "credentials": {
+      "googleSheetsOAuth2Api": {
+        "id": "7dIWwoowtD1RTjmu",
+        "name": "Google Sheets account"
+      }
+    }
+  },
+  {
+    "id": "wf2-filter-rejected",
+    "name": "Filter Rejected",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      448,
+      912
+    ],
+    "parameters": {
+      "jsCode": "return $input.all().filter(item => {\n  const approved = String(item.json.approved || '').trim().toLowerCase();\n  return approved === 'reject' || approved === 'rejected';\n});"
+    }
+  },
+  {
+    "id": "wf2-prep-reject-archive",
+    "name": "Prep Reject Archive Row",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      672,
+      912
+    ],
+    "parameters": {
+      "jsCode": "return $input.all().map(item => ({\n  json: { ...item.json, archived_reason: 'rejected' }\n}));"
+    }
+  },
+  {
+    "id": "wf2-archive-rejected",
+    "name": "Archive Rejected Opportunities",
+    "type": "n8n-nodes-base.googleSheets",
+    "typeVersion": 4,
+    "position": [
+      896,
+      912
+    ],
+    "parameters": {
+      "operation": "append",
+      "documentId": {
+        "__rl": true,
+        "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+        "mode": "id"
+      },
+      "sheetName": {
+        "__rl": true,
+        "value": "Archive",
+        "mode": "name"
+      },
+      "columns": {
+        "mappingMode": "autoMapInputData",
+        "value": {},
+        "matchingColumns": [],
+        "schema": []
+      },
+      "options": {}
+    },
+    "credentials": {
+      "googleSheetsOAuth2Api": {
+        "id": "7dIWwoowtD1RTjmu",
+        "name": "Google Sheets account"
+      }
+    }
+  },
+  {
+    "id": "wf2-mark-rejected",
+    "name": "Mark Rejected in Opportunities",
+    "type": "n8n-nodes-base.googleSheets",
+    "typeVersion": 4,
+    "position": [
+      1120,
+      912
+    ],
+    "parameters": {
+      "operation": "appendOrUpdate",
+      "documentId": {
+        "__rl": true,
+        "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+        "mode": "id"
+      },
+      "sheetName": {
+        "__rl": true,
+        "value": "Opportunities",
+        "mode": "name"
+      },
+      "columns": {
+        "mappingMode": "defineBelow",
+        "value": {
+          "opportunity_id": "={{ $json.opportunity_id }}",
+          "status": "archived"
+        },
+        "matchingColumns": [
+          "opportunity_id"
+        ],
+        "schema": [
+          {
+            "id": "opportunity_id",
+            "displayName": "opportunity_id",
+            "required": false,
+            "defaultMatch": true,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": true
+          },
+          {
+            "id": "status",
+            "displayName": "status",
+            "required": false,
+            "defaultMatch": false,
+            "display": true,
+            "type": "string",
+            "canBeUsedToMatch": false
+          }
+        ]
+      },
+      "options": {}
+    },
+    "credentials": {
+      "googleSheetsOAuth2Api": {
+        "id": "7dIWwoowtD1RTjmu",
+        "name": "Google Sheets account"
+      }
+    }
+  },
+  {
+    "id": "wf2-sort-rejected",
+    "name": "Sort Descending by Row",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      1344,
+      912
+    ],
+    "parameters": {
+      "jsCode": "return $('Filter Rejected').all()\n  .sort((a, b) => (b.json.row_number || 0) - (a.json.row_number || 0))\n  .map(item => ({ json: { row_number: item.json.row_number } }));"
+    }
+  },
+  {
+    "id": "wf2-delete-rejected-rows",
+    "name": "Delete Rejected Rows",
+    "type": "n8n-nodes-base.googleSheets",
+    "typeVersion": 4,
+    "position": [
+      1568,
+      912
+    ],
+    "parameters": {
+      "resource": "sheet",
+      "operation": "delete",
+      "documentId": {
+        "__rl": true,
+        "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+        "mode": "id"
+      },
+      "sheetName": {
+        "__rl": true,
+        "value": "Opportunities",
+        "mode": "name"
+      },
+      "toDelete": "rows",
+      "startIndex": "={{ $json.row_number }}",
+      "numberToDelete": 1
+    },
+    "credentials": {
+      "googleSheetsOAuth2Api": {
+        "id": "7dIWwoowtD1RTjmu",
+        "name": "Google Sheets account"
+      }
+    }
+  },
+  {
+    "id": "wf2-read-all-contacts",
+    "name": "Read All Contacts",
+    "type": "n8n-nodes-base.googleSheets",
+    "typeVersion": 4,
+    "position": [
+      880,
+      200
+    ],
+    "alwaysOutputData": true,
+    "credentials": {
+      "googleSheetsOAuth2Api": {
+        "id": "7dIWwoowtD1RTjmu",
+        "name": "Google Sheets account"
+      }
+    },
+    "parameters": {
+      "documentId": {
+        "__rl": true,
+        "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+        "mode": "id"
+      },
+      "sheetName": {
+        "__rl": true,
+        "value": "Contacts",
+        "mode": "name"
+      },
+      "filtersUI": {
+        "values": []
+      },
+      "options": {},
+      "combineFilters": "AND"
+    }
+  },
+  {
+    "id": "wf2-compute-hunter-offset",
+    "name": "Compute Hunter Offset",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      1100,
+      200
+    ],
+    "parameters": {
+      "mode": "runOnceForAllItems",
+      "jsCode": "// Read existing contacts - filter out empty placeholder from alwaysOutputData\nconst contacts = $('Read All Contacts').all().filter(c => c.json.company_name);\n\n// Skip opportunities already written to Contacts tab (prevents duplicates on re-runs)\nconst alreadyContacted = new Set(contacts.map(c => c.json.opportunity_id).filter(Boolean));\n\n// Deduplicate within this batch by opportunity_id (handles duplicate rows in Opportunities tab)\nconst seenInBatch = new Set();\nconst opps = $input.all().filter(opp => {\n  const id = opp.json.opportunity_id;\n  if (!id || alreadyContacted.has(id) || seenInBatch.has(id)) return false;\n  seenInBatch.add(id);\n  return true;\n});\n\nif (opps.length === 0) return [];\n\n// For each unique new opportunity, count existing contacts for same company -> set offset\nreturn opps.map(oppItem => {\n  const opp = oppItem.json;\n  const oppName = (opp.company_name || '').toLowerCase().trim();\n  const oppDomain = (opp.company_domain || '').toLowerCase().trim();\n\n  const existingCount = contacts.filter(c => {\n    const cDomain = (c.json.company_domain || '').toLowerCase().trim();\n    const cName = (c.json.company_name || '').toLowerCase().trim();\n    if (oppDomain && cDomain) return cDomain === oppDomain;\n    return cName === oppName;\n  }).length;\n\n  return { json: { ...opp, hunter_offset: existingCount } };\n});"
+    }
+  },
+  {
+    "id": "wf2-read-contacts-manual",
+    "name": "Read Contacts for Manual",
+    "type": "n8n-nodes-base.googleSheets",
+    "typeVersion": 4,
+    "position": [
+      224,
+      1120
+    ],
+    "alwaysOutputData": true,
+    "credentials": {
+      "googleSheetsOAuth2Api": {
+        "id": "7dIWwoowtD1RTjmu",
+        "name": "Google Sheets account"
+      }
+    },
+    "parameters": {
+      "documentId": {
+        "__rl": true,
+        "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+        "mode": "id"
+      },
+      "sheetName": {
+        "__rl": true,
+        "value": "Contacts",
+        "mode": "name"
+      },
+      "filtersUI": {
+        "values": []
+      },
+      "options": {}
+    }
+  },
+  {
+    "id": "wf2-read-outreach-queue",
+    "name": "Read Outreach Queue",
+    "type": "n8n-nodes-base.googleSheets",
+    "typeVersion": 4,
+    "position": [
+      448,
+      1120
+    ],
+    "alwaysOutputData": true,
+    "credentials": {
+      "googleSheetsOAuth2Api": {
+        "id": "7dIWwoowtD1RTjmu",
+        "name": "Google Sheets account"
+      }
+    },
+    "parameters": {
+      "documentId": {
+        "__rl": true,
+        "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+        "mode": "id"
+      },
+      "sheetName": {
+        "__rl": true,
+        "value": "Outreach Queue",
+        "mode": "name"
+      },
+      "filtersUI": {
+        "values": []
+      },
+      "options": {}
+    }
+  },
+  {
+    "id": "wf2-find-unprocessed",
+    "name": "Find Unprocessed Contacts",
+    "type": "n8n-nodes-base.code",
+    "typeVersion": 2,
+    "position": [
+      672,
+      1120
+    ],
+    "parameters": {
+      "jsCode": "// Contacts with a valid manually-added or Hunter-found email\nconst contacts = $('Read Contacts for Manual').all().filter(c =>\n  c.json.opportunity_id && c.json.contact_email\n);\n\n// Opportunity IDs already drafted in Outreach Queue\nconst queuedIds = new Set(\n  $('Read Outreach Queue').all().map(r => r.json.opportunity_id).filter(Boolean)\n);\n\n// All opportunity rows for enrichment (job_title, domain, location etc.)\nconst oppMap = {};\n$('Read Approved Opportunities').all().forEach(o => {\n  if (o.json.opportunity_id) oppMap[o.json.opportunity_id] = o.json;\n});\n\n// Only contacts not yet in Outreach Queue\nconst unprocessed = contacts.filter(c => !queuedIds.has(c.json.opportunity_id));\nif (unprocessed.length === 0) return [];\n\nreturn unprocessed.map(c => {\n  const opp = oppMap[c.json.opportunity_id] || {};\n  return { json: {\n    opportunity_id: c.json.opportunity_id,\n    company_name:   c.json.company_name  || opp.company_name  || '',\n    company_domain: opp.company_domain   || '',\n    job_title:      opp.job_title        || '',\n    location:       opp.location         || '',\n    seniority:      opp.seniority        || '',\n    skills:         opp.skills           || '',\n    contact_name:   c.json.contact_name  || '',\n    contact_title:  c.json.contact_title || '',\n    contact_email:  c.json.contact_email || '',\n    linkedin_url:   c.json.linkedin_url  || '',\n    source_url:     opp.source_url       || '',\n    company_classification: opp.company_classification || '',\n    company_summary:        opp.company_summary        || '',\n    _hiring_signals: [], _tech_stack: [], _role_domain: 'default'\n  }};\n});"
+    }
+  },
+  {
+    "id": "wf2-trigger-wf3-manual",
+    "name": "Trigger WF3 Manual",
+    "type": "n8n-nodes-base.executeWorkflow",
+    "typeVersion": 1,
+    "position": [
+      896,
+      1120
+    ],
+    "parameters": {
+      "workflowId": "T1jTXreAw0uZ2TOD",
+      "options": {}
+    }
+  }
+]

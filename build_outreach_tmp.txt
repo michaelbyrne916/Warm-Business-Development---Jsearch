@@ -1,0 +1,144 @@
+// Build structured LLM prompt for 3-email outreach sequence generation
+const results = [];
+
+const COMPANY_PROFILE = `
+ABOUT 10 PILLARS SOLUTIONS
+Website: www.10pillarssolutions.com
+10 Pillars Solutions is a boutique staffing and workforce solutions firm. We partner with companies across the country to solve hiring challenges with speed, precision, and a consultative approach that larger firms simply can't match. We are not a transactional shop. We take time to understand the client's business, culture, pain points, and growth trajectory.
+
+WHAT WE PLACE
+- Information Technology: Software Engineers, Architects, Project Managers, Cybersecurity, Data & Analytics, Infrastructure
+- Engineering: Mechanical, Electrical, Civil, Systems, Manufacturing
+- Finance & Accounting: Controllers, CFOs, Analysts, AP/AR, Audit, Compliance
+- Sales & Business Development: Individual contributors to VP-level leadership
+- Construction Management: Project Managers, Superintendents, Estimators, Site Leads
+- And virtually any other professional skillset
+
+ENGAGEMENT MODELS
+- Contract / Staff Augmentation: on-demand talent to scale fast
+- Contract-to-Hire: try before committing, with a clear path to permanent placement
+- Direct Hire: full retained or contingency search for permanent roles
+
+WHO WE SERVE
+- Enterprise organizations with high-volume or complex hiring needs
+- Small and mid-sized businesses that need a true partner, not just a vendor
+- SLED (State, Local Government and Education)
+- Both local on-site and fully remote placements across the U.S.
+
+WHY BOUTIQUE MATTERS
+- Direct access to decision-makers, no layers, no hand-offs
+- Faster turnaround, we move with urgency
+- Curated candidates, every submission is intentional, never a resume dump
+- Long-term partnership mindset
+`;
+
+const TONE_INSTRUCTIONS = `
+WRITING RULES (follow strictly)
+1. Lead with THEM, not us. Reference something specific about the company, the role posted, a growth signal, or the hiring challenge. NEVER open with "We are a staffing firm..."
+2. Be consultative, not salesy. Position 10 Pillars as a problem-solving partner, not a vendor pushing resumes.
+3. Keep it SHORT and scannable. Hiring managers do not read long emails.
+4. Personalize every message. Use the company name and the specific role in every email. Generic equals deleted.
+5. No hype language, no fluff, no filler phrases. Avoid "I hope this finds you well" type openers unless minimal and natural.
+6. Do NOT use em dashes, en dashes, or double hyphens as dashes anywhere in the copy. Use commas, periods, or rewrite the sentence instead. This is critical and signals AI-generated content.
+7. Do not overstate candidate availability. Keep any candidate references general and credible.
+8. Do not invent facts not present in the provided data. If company context is limited, use a lighter personalization approach rather than fabricating details.
+9. Subject lines should be clear and simple, focused on the role and company.
+10. Do NOT include a website URL in the email body. It appears in the sender signature automatically.
+11. Sign all emails as: Michael
+`;
+
+for (const item of $input.all()) {
+  const d = item.json;
+
+  const systemPrompt = `You are a senior business development writer for 10 Pillars Solutions, a boutique staffing firm.
+
+Your job is to write a 3-email outreach sequence for Michael at 10 Pillars Solutions. The emails target a hiring manager or HR contact at a direct-employer company that has an active job posting. The goal is to introduce 10 Pillars as a staffing partner that can help fill this role.
+${COMPANY_PROFILE}
+${TONE_INSTRUCTIONS}
+
+Respond ONLY with a valid JSON object using this exact structure. No markdown, no preamble, no dashes of any kind in the copy:
+{
+  "email_1_subject": "...",
+  "email_1_body": "...",
+  "email_2_subject": "...",
+  "email_2_body": "...",
+  "email_3_subject": "...",
+  "email_3_body": "...",
+  "personalization_notes": "Brief notes on what was personalized and why",
+  "company_research_summary": "Summary of what is known about the company from the provided data",
+  "why_this_message_is_relevant": "Why this outreach is timely and relevant to this specific company and role"
+}`;
+
+  const descLower = (d.job_description || '').substring(0, 800).toLowerCase();
+  let engagementAngle = 'contract, contract-to-hire, or direct hire';
+  if (/contract|c2h|temp|augmentation/.test(descLower)) engagementAngle = 'contract or contract-to-hire';
+  else if (/permanent|full.time|direct hire/.test(descLower)) engagementAngle = 'direct hire';
+
+  const contactFirst = (d.contact_name || '').split(' ')[0] || 'there';
+
+  const userPrompt = `Write a 3-email outreach sequence for this specific opportunity:
+
+TARGET COMPANY
+Name: ${d.company_name}
+Website: ${d.company_domain ? 'https://' + d.company_domain : 'Unknown'}
+Industry: ${d.company_industry || 'Not specified'}
+Summary: ${d.company_summary || 'Not available'}
+Hiring Signals: ${Array.isArray(d._hiring_signals) ? d._hiring_signals.join(', ') : (d._hiring_signals || 'None noted')}
+Tech Stack in JD: ${Array.isArray(d._tech_stack) ? d._tech_stack.join(', ') : (d._tech_stack || 'Not specified')}
+
+OPEN ROLE
+Title: ${d.job_title}
+Location: ${d.location}
+Seniority: ${d.seniority || 'Not specified'}
+Key Skills: ${d.skills || 'Not specified'}
+Engagement type to pitch: ${engagementAngle}
+Job Description Excerpt:
+${(d.job_description || '').substring(0, 800)}
+
+CONTACT
+Name: ${d.contact_name || 'Hiring Manager'} (address by first name: ${contactFirst})
+Title: ${d.contact_title || 'Unknown'}
+Why contacted: ${d.contact_reasoning || 'Best available match at this company'}
+
+---
+
+EMAIL 1 REQUIREMENTS (Introductory Outreach):
+- Open by addressing ${contactFirst} by name
+- Mention the posted ${d.job_title} role clearly in the opening or first sentence
+- Include 1 to 2 sentences that show you did research: reference something specific about ${d.company_name}, the role requirements, the industry context, or a visible hiring signal. If company context is limited, keep personalization lighter and credible rather than fabricating details
+- Include a brief, natural explanation of how 10 Pillars Solutions can support this search as a staffing partner (1 to 2 sentences, not a full pitch)
+- Since you may not have reached the correct person, include a natural line asking whether they are the right contact for this search, and if not, whether they can point you to the right person or forward you along
+- End with a simple, low-friction call to action (offer a 15-minute call or to share a few profiles)
+- Total body: 4 to 6 sentences. Concise and easy to scan.
+- Close with: Michael
+
+EMAIL 2 REQUIREMENTS (Follow-Up):
+- Reference that you emailed earlier about the ${d.job_title} opening at ${d.company_name}
+- Ask how the search is going in a natural, non-pushy way
+- Mention that 10 Pillars currently has solid candidates available for a ${d.job_title} role (keep this general and credible, do not overstate or invent specifics)
+- Offer to discuss the search and how 10 Pillars may be able to support it
+- Total body: 3 to 4 sentences. Helpful, brief, and natural.
+- Close with: Michael
+
+EMAIL 3 REQUIREMENTS (Final Follow-Up / Partner Qualification):
+- Acknowledge that you have reached out a couple of times regarding the ${d.job_title} role at ${d.company_name}
+- Note politely that you may not have reached the right person since you have not heard back
+- Either ask who the appropriate contact would be for this type of search, or express interest in learning how to become a qualified staffing vendor or partner for future hiring support at ${d.company_name}
+- Keep the tone professional and respectful with zero pressure
+- Total body: 3 to 4 sentences. Brief and graceful.
+- Close with: Michael
+
+---
+
+Write all six outreach assets (3 subjects, 3 bodies) fully personalized to this company, role, and contact. Use actual names, not placeholders. No dashes of any kind in the copy.`;
+
+  results.push({
+    json: {
+      ...d,
+      _system_prompt: systemPrompt,
+      _user_prompt: userPrompt
+    }
+  });
+}
+
+return results;

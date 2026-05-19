@@ -1,0 +1,41 @@
+[
+  {
+    "type": "addNode",
+    "node": {
+      "id": "read-excluded-companies",
+      "name": "Read Excluded Companies",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [448, 608],
+      "executeOnce": true,
+      "parameters": {
+        "documentId": {"__rl": true, "value": "={{ $vars.GOOGLE_SHEETS_ID }}", "mode": "id"},
+        "sheetName": {"__rl": true, "value": "Excluded Companies", "mode": "name"},
+        "filtersUI": {"values": []},
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {"id": "7dIWwoowtD1RTjmu", "name": "Google Sheets account"}
+      }
+    }
+  },
+  {
+    "type": "addConnection",
+    "source": "Read Targeting Sheet",
+    "target": "Read Excluded Companies"
+  },
+  {
+    "type": "updateNode",
+    "name": "Build Search Combinations",
+    "parameters": {
+      "jsCode": "// Normalize object keys — strips hidden chars (zero-width spaces, NBSP, BOM, etc.)\nfunction cleanKeys(obj) {\n  const clean = {};\n  for (const key of Object.keys(obj)) {\n    const normalKey = key.replace(/[\\s\\u00A0\\u200B\\u200C\\u200D\\uFEFF]+/g, '_').replace(/^_+|_+$/g, '').toLowerCase();\n    clean[normalKey] = obj[key];\n  }\n  return clean;\n}\n\n// Load excluded companies from sheet (specific firm + enterprise names)\nconst excludedCompanies = $('Read Excluded Companies').all()\n  .filter(r => r.json.company_name)\n  .map(r => ({\n    name: (r.json.company_name || '').toLowerCase().trim(),\n    type: (r.json.type || 'excluded').toLowerCase().trim()\n  }));\n\nconst combos = [];\n\nfor (const item of $input.all()) {\n  const row = cleanKeys(item.json);\n\n  const isActive = row.active === true || String(row.active).toLowerCase() === 'true';\n  if (!isActive) continue;\n\n  const roles = String(row.role_keywords || '').split(';').map(r => r.trim()).filter(Boolean);\n  const locs = String(row.locations || '').split(';').map(l => l.trim()).filter(Boolean);\n  const excludedKeywords = String(row.excluded_keywords || '').split(';').map(k => k.trim()).filter(Boolean);\n\n  for (const role of roles) {\n    for (const loc of locs) {\n      combos.push({\n        search_id: row.search_id || '',\n        query: role,\n        location: loc,\n        employment_type: String(row.employment_type || 'FULLTIME').toUpperCase().replace(/\\s+/g, ''),\n        excluded_keywords: excludedKeywords,\n        _excluded_companies: excludedCompanies\n      });\n    }\n  }\n}\n\nreturn combos.map(c => ({ json: c }));"
+    }
+  },
+  {
+    "type": "updateNode",
+    "name": "Staffing Keyword Filter",
+    "parameters": {
+      "jsCode": "// Generic descriptors — hardcoded, these never need to change\nconst GENERIC_STAFFING_KEYWORDS = [\n  'staffing','recruiting','recruitment','talent acquisition','headhunter',\n  'executive search','placement agency','temp agency','contingent workforce',\n  'msp','rpo','managed service provider','vendor management','contract staffing',\n  'staff augmentation','workforce solutions'\n];\n\nconst results = [];\n\nfor (const item of $input.all()) {\n  const job = { ...item.json };\n  const checkText = `${job.company_name} ${job.job_description}`.toLowerCase();\n\n  // Sheet-based exclusions — specific company names (staffing firms + enterprises)\n  const sheetExclusions = job._excluded_companies || [];\n\n  // 1. Check generic staffing keywords\n  const genericMatch = GENERIC_STAFFING_KEYWORDS.find(kw => checkText.includes(kw));\n\n  // 2. Check sheet exclusions\n  const sheetMatch = sheetExclusions.find(ex => ex.name && checkText.includes(ex.name));\n\n  if (genericMatch) {\n    job.pre_filter_result = 'staffing_firm';\n    job.company_classification = 'staffing_firm';\n    job.company_classification_reason = `Keyword match: \"${genericMatch}\"`;\n  } else if (sheetMatch) {\n    job.pre_filter_result = 'staffing_firm'; // routes to rejected path in Route by Pre-Filter\n    job.company_classification = sheetMatch.type === 'enterprise' ? 'excluded_enterprise' : 'staffing_firm';\n    job.company_classification_reason = `Sheet exclusion (${sheetMatch.type}): \"${sheetMatch.name}\"`;\n  } else {\n    const suspiciousPatterns = /(consulting|solutions|group|partners|services|associates|resources)$/i;\n    job.pre_filter_result = suspiciousPatterns.test(job.company_name.trim()) ? 'unclear' : 'likely_direct';\n  }\n\n  results.push({ json: job });\n}\n\nreturn results;"
+    }
+  }
+]

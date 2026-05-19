@@ -1,0 +1,80 @@
+{
+  "data": {
+    "domain": "acmefintech.com",
+    "disposable": false,
+    "webmail": false,
+    "accept_all": false,
+    "pattern": "{first}.{last}",
+    "organization": "Acme FinTech Inc",
+    "country": "US",
+    "state": "TX",
+    "emails": [
+      {
+        "value": "sarah.chen@acmefintech.com",
+        "type": "professional",
+        "confidence": 92,
+        "first_name": "Sarah",
+        "last_name": "Chen",
+        "position": "Director of Engineering",
+        "seniority": "director",
+        "department": "engineering",
+        "linkedin": "sarahchen-eng",
+        "twitter": null,
+        "phone_number": null,
+        "verification": { "date": "2026-03-01", "status": "valid" },
+        "sources": [{"domain": "acmefintech.com", "uri": "https://acmefintech.com/team", "extracted_on": "2026-02-15"}]
+      },
+      {
+        "value": "mike.torres@acmefintech.com",
+        "type": "professional",
+        "confidence": 87,
+        "first_name": "Mike",
+        "last_name": "Torres",
+        "position": "Engineering Manager",
+        "seniority": "manager",
+        "department": "engineering",
+        "linkedin": "miketorres-em",
+        "twitter": null,
+        "phone_number": "+1-512-555-0182",
+        "verification": { "date": "2026-03-01", "status": "valid" },
+        "sources": [{"domain": "acmefintech.com", "uri": "https://linkedin.com/in/miketorres-em", "extracted_on": "2026-02-20"}]
+      },
+      {
+        "value": "jennifer.kim@acmefintech.com",
+        "type": "professional",
+        "confidence": 78,
+        "first_name": "Jennifer",
+        "last_name": "Kim",
+        "position": "Talent Acquisition Manager",
+        "seniority": "manager",
+        "department": "human_resources",
+        "linkedin": null,
+        "twitter": null,
+        "phone_number": null,
+        "verification": { "date": "2026-02-15", "status": "valid" },
+        "sources": [{"domain": "acmefintech.com", "uri": "https://linkedin.com/in/jenniferkim-ta", "extracted_on": "2026-01-10"}]
+      },
+      {
+        "value": "alex.patel@acmefintech.com",
+        "type": "professional",
+        "confidence": 71,
+        "first_name": "Alex",
+        "last_name": "Patel",
+        "position": "VP of Engineering",
+        "seniority": "executive",
+        "department": "engineering",
+        "linkedin": "alexpatel-vpe",
+        "twitter": "alexpatel_eng",
+        "phone_number": null,
+        "verification": { "date": "2026-03-10", "status": "valid" },
+        "sources": [{"domain": "acmefintech.com", "uri": "https://acmefintech.com/about", "extracted_on": "2026-03-05"}]
+      }
+    ]
+  },
+  "meta": {
+    "results": 4,
+    "limit": 20,
+    "offset": 0,
+    "params": { "domain": "acmefintech.com", "limit": 20 }
+  }
+}

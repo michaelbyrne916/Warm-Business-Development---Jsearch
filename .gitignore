@@ -1,0 +1,22 @@
+# MCP / n8n API credentials  — CRITICAL: contains live N8N_API_KEY JWT
+.mcp.json
+
+# Claude Code local config
+.claude/settings.local.json
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# n8n local artifacts
+*.credentials.json
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
