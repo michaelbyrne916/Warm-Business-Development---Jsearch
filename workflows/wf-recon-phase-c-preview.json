@@ -1,0 +1,183 @@
+{
+  "name": "WF-RECON Phase C — Reconciliation Preview (Read-Only)",
+  "nodes": [
+    {
+      "id": "rec-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 300],
+      "parameters": {}
+    },
+    {
+      "id": "rec-read-oq",
+      "name": "Read Outreach Queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [220, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "192SvtVdg3hA0f4ZvHSWZTX2FG1HOzU_vw8jQA9md6no",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Outreach Queue",
+          "mode": "name"
+        },
+        "filtersUI": { "values": [] },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "rec-read-sent-log",
+      "name": "Read Sent Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [440, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "192SvtVdg3hA0f4ZvHSWZTX2FG1HOzU_vw8jQA9md6no",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sent Log",
+          "mode": "name"
+        },
+        "filtersUI": { "values": [] },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "rec-read-excluded",
+      "name": "Read Excluded Companies",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [660, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "192SvtVdg3hA0f4ZvHSWZTX2FG1HOzU_vw8jQA9md6no",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Excluded Companies",
+          "mode": "name"
+        },
+        "filtersUI": { "values": [] },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "rec-read-tracker",
+      "name": "Read Sequence Tracker",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [880, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "1F2A8TtN5wOuHjvzcO0XYvu-DPmrQWNVaMklT6FTgF9Q",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sequence Tracker",
+          "mode": "name"
+        },
+        "filtersUI": { "values": [] },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "rec-classify",
+      "name": "Classify Contacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// PHASE C RECONCILIATION PREVIEW — Read-only classification\n// Source of truth: Sent Log. OQ is rebuilt from Sent Log truth in Phase E.\n\nconst HOLD_OPP_IDS = new Set([\n  '4487ac861d0a', 'd0eff2075a84', 'f680494b6b8f', 'be2b65c90332'\n]);\nconst STALE_DAYS = 14;\nconst FOLLOWUP_LAG_BUSINESS_DAYS = 3;\nconst HELD_SUPPRESSION_DAYS = 90;\n\nconst oqRows       = $('Read Outreach Queue').all().map(i => i.json);\nconst sentRows     = $('Read Sent Log').all().map(i => i.json);\nconst excludedRows = $('Read Excluded Companies').all().map(i => i.json);\nconst trackerRows  = $('Read Sequence Tracker').all().map(i => i.json);\n\n// Excluded company names (lowercased). Substring match against company_name (WF1 convention).\nconst excludedNames = excludedRows\n  .map(r => (r.company_name || '').toLowerCase().trim())\n  .filter(Boolean);\n\n// Build email -> [sent_timestamp] map from Sent Log\nconst sentByEmail = new Map();\nfor (const r of sentRows) {\n  const email = (r.contact_email || '').toLowerCase().trim();\n  if (!email) continue;\n  const ts = r.sent_timestamp ? new Date(r.sent_timestamp) : null;\n  if (!ts || isNaN(ts.getTime())) continue;\n  if (!sentByEmail.has(email)) sentByEmail.set(email, []);\n  sentByEmail.get(email).push(ts);\n}\nfor (const arr of sentByEmail.values()) arr.sort((a, b) => a - b);\n\nconst today = new Date();\nconst addBusinessDays = (d, n) => {\n  const r = new Date(d);\n  let added = 0;\n  while (added < n) {\n    r.setDate(r.getDate() + 1);\n    const dow = r.getDay();\n    if (dow !== 0 && dow !== 6) added++;\n  }\n  return r.toISOString().split('T')[0];\n};\n\n// Filter OQ to non-rejected\nconst oqNonReject = oqRows.filter(r => {\n  const s = (r.approval_status || '').toLowerCase().trim();\n  return s !== 'reject' && s !== 'rejected';\n});\n\nconst buckets = {\n  excluded_archive: [],\n  held_campaign_overlap: [],\n  warm_complete_migrate_cold: [],\n  mid_sequence_reconcile: [],\n  fresh_keep: []\n};\n\nconst midRecency = { '<=7': 0, '8-14': 0, '15-30': 0, '30+': 0 };\n\nfor (const row of oqNonReject) {\n  const email = (row.contact_email || '').toLowerCase().trim();\n  const companyLower = (row.company_name || '').toLowerCase().trim();\n  const oppId = (row.opportunity_id || '').trim();\n\n  const sends = sentByEmail.get(email) || [];\n  const sendCount = sends.length;\n  const lastSent = sends.length ? sends[sends.length - 1] : null;\n  const daysSinceLast = lastSent ? Math.floor((today - lastSent) / 86400000) : null;\n\n  // Rule 1: Excluded company (substring match)\n  const excludedMatch = companyLower\n    ? excludedNames.find(n => n && companyLower.includes(n))\n    : null;\n  if (excludedMatch) {\n    buckets.excluded_archive.push({\n      ...row,\n      _send_count: sendCount,\n      _last_sent_date: lastSent ? lastSent.toISOString() : null,\n      _days_since_last_sent: daysSinceLast,\n      _excluded_match: excludedMatch,\n      _archive_reason: 'excluded_company'\n    });\n    continue;\n  }\n\n  // Rule 2: HOLD list — campaign overlap\n  if (HOLD_OPP_IDS.has(oppId)) {\n    buckets.held_campaign_overlap.push({\n      ...row,\n      _send_count: sendCount,\n      _last_sent_date: lastSent ? lastSent.toISOString() : null,\n      _days_since_last_sent: daysSinceLast,\n      _new_approval_status: 'held_campaign_overlap',\n      _add_to_suppression_until: new Date(today.getTime() + HELD_SUPPRESSION_DAYS * 86400000).toISOString().split('T')[0]\n    });\n    continue;\n  }\n\n  // Rule 3: 3+ warm sends → complete, migrate to cold\n  if (sendCount >= 3) {\n    buckets.warm_complete_migrate_cold.push({\n      ...row,\n      _send_count: sendCount,\n      _last_sent_date: lastSent ? lastSent.toISOString() : null,\n      _days_since_last_sent: daysSinceLast,\n      _archive_reason: 'migrated_cold',\n      _cold_industry: 'Other',\n      _cold_needs_classification: 'TRUE'\n    });\n    continue;\n  }\n\n  // Rule 4: 1-2 warm sends → mid_sequence_reconcile\n  if (sendCount >= 1 && sendCount <= 2) {\n    let recencyBand;\n    if (daysSinceLast <= 7) recencyBand = '<=7';\n    else if (daysSinceLast <= 14) recencyBand = '8-14';\n    else if (daysSinceLast <= 30) recencyBand = '15-30';\n    else recencyBand = '30+';\n    midRecency[recencyBand]++;\n\n    const isStale = daysSinceLast > STALE_DAYS;\n    const nextStage = sendCount; // 0-indexed prior stage done\n\n    const update = isStale\n      ? {\n          _action: 'hold_manual_review',\n          _new_approval_status: 'pending',\n          _new_sent_status: 'unsent',\n          _new_follow_up_stage: nextStage,\n          _new_scheduled_date: '',\n          _stale: true\n        }\n      : {\n          _action: 'reschedule_next_stage',\n          _new_approval_status: 'approved',\n          _new_sent_status: 'unsent',\n          _new_follow_up_stage: nextStage,\n          _new_scheduled_date: addBusinessDays(today, FOLLOWUP_LAG_BUSINESS_DAYS),\n          _stale: false\n        };\n\n    buckets.mid_sequence_reconcile.push({\n      ...row,\n      _send_count: sendCount,\n      _last_sent_date: lastSent ? lastSent.toISOString() : null,\n      _days_since_last_sent: daysSinceLast,\n      _recency_band: recencyBand,\n      ...update\n    });\n    continue;\n  }\n\n  // Rule 5: 0 warm sends → fresh_keep\n  buckets.fresh_keep.push({\n    ...row,\n    _send_count: sendCount,\n    _last_sent_date: null,\n    _days_since_last_sent: null\n  });\n}\n\n// Dedup check vs Sequence Tracker (cold sheet) — case-insensitive Email match\nconst trackerEmailSet = new Set(\n  trackerRows\n    .map(r => (r.Email || '').toLowerCase().trim())\n    .filter(Boolean)\n);\nconst warmCompleteEmails = buckets.warm_complete_migrate_cold\n  .map(r => (r.contact_email || '').toLowerCase().trim())\n  .filter(Boolean);\nconst alreadyInColdList = warmCompleteEmails.filter(e => trackerEmailSet.has(e));\nconst dedup_check = {\n  warm_complete_count: warmCompleteEmails.length,\n  sequence_tracker_unique_emails: trackerEmailSet.size,\n  already_in_cold: alreadyInColdList.length,\n  net_new_to_migrate: warmCompleteEmails.length - alreadyInColdList.length,\n  already_in_cold_emails: alreadyInColdList\n};\n\n// Safety assertion: totals must reconcile\nconst totalClassified = Object.values(buckets).reduce((s, arr) => s + arr.length, 0);\nconst assertion = {\n  total_classified: totalClassified,\n  oq_non_reject_count: oqNonReject.length,\n  pass: totalClassified === oqNonReject.length\n};\nif (!assertion.pass) {\n  throw new Error(`Safety assertion FAILED: classified ${totalClassified} != non-reject OQ ${oqNonReject.length}`);\n}\n\n// Mid-sequence before/after samples\nconst midBeforeAfter = buckets.mid_sequence_reconcile.slice(0, 5).map(r => ({\n  opportunity_id: r.opportunity_id,\n  contact_email: r.contact_email,\n  company_name: r.company_name,\n  current_row: {\n    approval_status: r.approval_status,\n    sent_status: r.sent_status,\n    follow_up_stage: r.follow_up_stage,\n    scheduled_date: r.scheduled_date\n  },\n  computed: {\n    send_count: r._send_count,\n    last_sent_date: r._last_sent_date,\n    days_since_last_sent: r._days_since_last_sent,\n    recency_band: r._recency_band,\n    stale: r._stale\n  },\n  proposed_update: {\n    action: r._action,\n    approval_status: r._new_approval_status,\n    sent_status: r._new_sent_status,\n    follow_up_stage: r._new_follow_up_stage,\n    scheduled_date: r._new_scheduled_date\n  }\n}));\n\n// Lightweight sample for the other 4 buckets\nconst sample = (arr, n) => arr.slice(0, n).map(r => {\n  const out = {\n    opportunity_id: r.opportunity_id,\n    contact_email: r.contact_email,\n    company_name: r.company_name,\n    send_count: r._send_count,\n    last_sent_date: r._last_sent_date,\n    days_since_last_sent: r._days_since_last_sent\n  };\n  if (r._excluded_match) out.excluded_match = r._excluded_match;\n  if (r._archive_reason) out.archive_reason = r._archive_reason;\n  if (r._new_approval_status) out.new_approval_status = r._new_approval_status;\n  if (r._add_to_suppression_until) out.add_to_suppression_until = r._add_to_suppression_until;\n  return out;\n});\n\nreturn [{\n  json: {\n    phase: 'C — preview only, no writes',\n    inputs: {\n      outreach_queue_total: oqRows.length,\n      outreach_queue_non_reject: oqNonReject.length,\n      sent_log_total: sentRows.length,\n      excluded_companies_total: excludedRows.length,\n      sequence_tracker_total: trackerRows.length\n    },\n    bucket_counts: {\n      excluded_archive: buckets.excluded_archive.length,\n      held_campaign_overlap: buckets.held_campaign_overlap.length,\n      warm_complete_migrate_cold: buckets.warm_complete_migrate_cold.length,\n      mid_sequence_reconcile: buckets.mid_sequence_reconcile.length,\n      fresh_keep: buckets.fresh_keep.length\n    },\n    mid_sequence_recency: midRecency,\n    dedup_check,\n    samples: {\n      excluded_archive: sample(buckets.excluded_archive, 5),\n      held_campaign_overlap: sample(buckets.held_campaign_overlap, 5),\n      warm_complete_migrate_cold: sample(buckets.warm_complete_migrate_cold, 5),\n      mid_sequence_reconcile: sample(buckets.mid_sequence_reconcile, 5),\n      fresh_keep: sample(buckets.fresh_keep, 5)\n    },\n    mid_sequence_before_after: midBeforeAfter,\n    assertion\n  }\n}];"
+      }
+    },
+    {
+      "id": "rec-sticky",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-260, 80],
+      "parameters": {
+        "content": "## WF-RECON Phase C — Reconciliation PREVIEW\n\n**Read-only.** No writes. Validates the rebuild plan before Phase E executes it.\n\n**Inputs (4 reads):**\n- Outreach Queue (warm sheet)\n- Sent Log (warm sheet — source of truth)\n- Excluded Companies (warm sheet)\n- Sequence Tracker (cold sheet)\n\n**Classify Contacts (Code):**\n1. excluded_archive — company in Excluded Companies\n2. held_campaign_overlap — opp_id in HOLD list (4 opps)\n3. warm_complete_migrate_cold — Sent Log send_count >= 3\n4. mid_sequence_reconcile — 1-2 sends (stale >14d → manual review)\n5. fresh_keep — 0 sends\n\n**Output:** bucket counts, mid-sequence recency bands, 5 samples/bucket, full before/after for 5 mid-sequence rows, total==OQ_non_reject assertion.\n\n**DO NOT wire writes here.** Phase E adds the 4 destination branches.",
+        "height": 560,
+        "width": 380
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Read Outreach Queue", "type": "main", "index": 0 }]]
+    },
+    "Read Outreach Queue": {
+      "main": [[{ "node": "Read Sent Log", "type": "main", "index": 0 }]]
+    },
+    "Read Sent Log": {
+      "main": [[{ "node": "Read Excluded Companies", "type": "main", "index": 0 }]]
+    },
+    "Read Excluded Companies": {
+      "main": [[{ "node": "Read Sequence Tracker", "type": "main", "index": 0 }]]
+    },
+    "Read Sequence Tracker": {
+      "main": [[{ "node": "Classify Contacts", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "_metadata": {
+    "workflow_id": "CCQu4oRXAXzQ32Rl",
+    "version_counter": 2,
+    "active": false,
+    "exported_at": "2026-05-20",
+    "exported_from_execution": "9833",
+    "note": "Phase C preview — read-only. No writes. Phase E adds destination write branches."
+  }
+}
