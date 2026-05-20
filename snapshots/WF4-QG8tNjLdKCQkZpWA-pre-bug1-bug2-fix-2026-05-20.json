@@ -1,0 +1,37 @@
+{
+  "_snapshot_meta": {
+    "workflow_id": "QG8tNjLdKCQkZpWA",
+    "workflow_name": "WF4: Approved Send",
+    "active": false,
+    "versionId": "5d0a7c57-9f1f-4a82-88eb-bd9c4cb0b7e4",
+    "versionCounter": 124,
+    "updatedAt": "2026-05-19T20:26:52.783Z",
+    "snapshot_date": "2026-05-20",
+    "snapshot_purpose": "Pre-fix revert reference for Bug 1 (Write Follow-ups appendOrUpdate→append) and Bug 2 (Build Follow-up Sequence source: Prepare Send Fields→Send via Gmail via pairedItem)"
+  },
+  "nodes": [
+    {
+      "id": "wf4-build-followups",
+      "name": "Build Follow-up Sequence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3312, 288],
+      "parameters": {
+        "jsCode": "// Build follow-up queue entries using pre-generated email content from WF3\n// Stage 1 (email 2): triggered when stage 0 sends — 3 business days out\n// Stage 2 (email 3): triggered when stage 1 sends — 7 calendar days out\n\nconst results = [];\nconst now = new Date();\n\nconst addCalendarDays = (d, n) => {\n  const r = new Date(d);\n  r.setDate(r.getDate() + n);\n  return r.toISOString().split('T')[0];\n};\n\nconst addBusinessDays = (d, n) => {\n  const r = new Date(d);\n  let added = 0;\n  while (added < n) {\n    r.setDate(r.getDate() + 1);\n    const dow = r.getDay();\n    if (dow !== 0 && dow !== 6) added++; // skip weekends\n  }\n  return r.toISOString().split('T')[0];\n};\n\nconst allItems = $('Prepare Send Fields').all();\n\nfor (const item of allItems) {\n  const data = item.json;\n  const stage = parseInt(data.follow_up_stage || '0');\n\n  if (stage === 0) {\n    // Email 1 just sent — queue Email 2 for 3 business days from now\n    results.push({ json: {\n      opportunity_id: data.opportunity_id || '',\n      contact_email: data.contact_email || '',\n      contact_name: data.contact_name || '',\n      company_name: data.company_name || '',\n      company_domain: data.company_domain || '',\n      job_title: data.job_title || '',\n      location: data.location || '',\n      email_1_subject: data.email_1_subject || '',\n      email_1_body: data.email_1_body || '',\n      email_2_subject: data.email_2_subject || '',\n      email_2_body: data.email_2_body || '',\n      email_3_subject: data.email_3_subject || '',\n      email_3_body: data.email_3_body || '',\n      email_body: data.email_2_body || '',\n      approval_status: 'approved',\n      sent_status: 'unsent',\n      follow_up_stage: 1,\n      scheduled_date: addBusinessDays(now, 3),\n      posted_date: data.posted_date || '',\n      source_url: data.source_url || ''\n    }});\n\n  } else if (stage === 1) {\n    // Email 2 just sent — queue Email 3 for 7 calendar days from now\n    results.push({ json: {\n      opportunity_id: data.opportunity_id || '',\n      contact_email: data.contact_email || '',\n      contact_name: data.contact_name || '',\n      company_name: data.company_name || '',\n      company_domain: data.company_domain || '',\n      job_title: data.job_title || '',\n      location: data.location || '',\n      email_1_subject: data.email_1_subject || '',\n      email_1_body: data.email_1_body || '',\n      email_2_subject: data.email_2_subject || '',\n      email_2_body: data.email_2_body || '',\n      email_3_subject: data.email_3_subject || '',\n      email_3_body: data.email_3_body || '',\n      email_body: data.email_3_body || '',\n      approval_status: 'approved',\n      sent_status: 'unsent',\n      follow_up_stage: 2,\n      scheduled_date: addCalendarDays(now, 7),\n      posted_date: data.posted_date || '',\n      source_url: data.source_url || ''\n    }});\n  }\n  // stage 2 (email 3) — no further follow-ups\n}\n\nreturn results;"
+      }
+    },
+    {
+      "id": "wf4-write-followups",
+      "name": "Write Follow-ups to Queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [3536, 288],
+      "parameters_critical_fields": {
+        "operation": "appendOrUpdate",
+        "matchingColumns": ["opportunity_id", "follow_up_stage"]
+      },
+      "_note": "Full schema preserved in n8n versionId 5d0a7c57-9f1f-4a82-88eb-bd9c4cb0b7e4 (v124). Bug 1 fix only changes operation to 'append'; matchingColumns becomes irrelevant for append but left intact."
+    }
+  ],
+  "_revert_instructions": "To revert: n8n_update_partial_workflow id=QG8tNjLdKCQkZpWA with two updateNode ops — (1) wf4-write-followups parameters.operation back to 'appendOrUpdate'; (2) wf4-build-followups parameters.jsCode back to the snapshot above. Or restore via n8n UI version history: select v124, restore."
+}

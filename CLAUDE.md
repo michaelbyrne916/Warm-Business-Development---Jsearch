@@ -145,6 +145,16 @@ When using `n8n_update_partial_workflow`, the correct structure is:
 - **Fix 2** (one-shot cleanup workflow `r839lZSMkYZz7pnj`, exec 9773): deleted 45 Bucket A phantom rows, preserved 5 Bucket B legit follow-ups. Workflow archived in n8n (renamed `ARCHIVED — …`, inactive), retained as reference.
 - **Open:** Cause 2 — WF2 should pre-filter contacts against the suppression list before writing to Outreach Queue. Ticketed for week of 2026-05-26 after observing a clean 5/22 follow-up cycle.
 
+### 2026-05-20 — WF4 desync fix (VALIDATED)
+
+- **Bug 1 (sent-flag overwrite):** `Write Follow-ups to Queue` operation `appendOrUpdate` → `append`. The follow-up write's `matchingColumns: [opportunity_id, follow_up_stage]` was clobbering `Update Outreach Queue Sent`'s `sent_status=sent` write back to `unsent` on the just-sent stage-0 row, producing a single merged stage-1/unsent row instead of two distinct rows. Result: Outreach Queue desynced from Sent Log truth on every WF4 run since the follow-up flow was wired in — ~566 corrupted rows estimated.
+- **Bug 2 (phantom follow-ups, source still pre-Gmail):** `Build Follow-up Sequence` resourced from `$('Send via Gmail').all()` with `$('Prepare Send Fields').itemMatching(sentItem.pairedItem.item)` pairedItem bridge, filtering to items with a real Gmail `id` and no `error`. The prior `b42098b` fix (reading `Prepare Send Fields`) was still **pre-DRY_RUN gate and pre-Gmail-failure drop-off** — items dropped by DRY_RUN or `continueOnFail: true` Gmail failures still got follow-ups scheduled. b42098b reduced the blast radius from 50 → 5 but didn't restore post-send truth.
+- **Validated** (WF4 exec 9818, manual run with WF4 deactivated): test contact `TEST-WF4-20260520` produced exactly **2 rows** — stage-0 with `sent_status=sent` and timestamp; stage-1 `sent_status=unsent` scheduled 2026-05-25 (+3 business days). `Build Follow-up Sequence` output count = **1** (post-send truth). Sent Log + Suppression List each got 1 new entry. **PASS.** All test artifacts cleaned up.
+- **Version:** 124 → 125. Snapshot: [snapshots/WF4-QG8tNjLdKCQkZpWA-pre-bug1-bug2-fix-2026-05-20.json](snapshots/WF4-QG8tNjLdKCQkZpWA-pre-bug1-bug2-fix-2026-05-20.json) (revert reference; also available as n8n UI version 124).
+- **CRITICAL — WF4 remains DEACTIVATED.** Must NOT reactivate until the reconciliation workflow rebuilds the ~566 corrupted Outreach Queue rows from Sent Log truth. Reactivating now would re-send Email 1 to contacts the desynced queue wrongly shows as `unsent`.
+- **NEXT:** Phase C–E reconciliation build (design complete in prior planning, not yet built).
+- **FUTURE TICKET:** Cross-campaign suppression registry — candidate-marketing overlap discovered 2026-05-19.
+
 ---
 
 ## Key Learnings
