@@ -683,8 +683,12 @@
             "company_name": "={{ $json.company_name }}",
             "job_title": "={{ $json.job_title }}",
             "location": "={{ $json.location }}",
-            "email_subject": "={{ $json.email_subject }}",
-            "email_body": "={{ $json.email_body }}",
+            "email_1_subject": "={{ $json.email_1_subject }}",
+            "email_1_body": "={{ $json.email_1_body }}",
+            "email_2_subject": "={{ $json.email_2_subject }}",
+            "email_2_body": "={{ $json.email_2_body }}",
+            "email_3_subject": "={{ $json.email_3_subject }}",
+            "email_3_body": "={{ $json.email_3_body }}",
             "approval_status": "={{ $json.approval_status }}",
             "sent_status": "={{ $json.sent_status }}",
             "follow_up_stage": "={{ $json.follow_up_stage }}",
@@ -743,8 +747,8 @@
               "canBeUsedToMatch": true
             },
             {
-              "id": "email_subject",
-              "displayName": "email_subject",
+              "id": "email_1_subject",
+              "displayName": "email_1_subject",
               "required": false,
               "defaultMatch": false,
               "display": true,
@@ -752,8 +756,44 @@
               "canBeUsedToMatch": true
             },
             {
-              "id": "email_body",
-              "displayName": "email_body",
+              "id": "email_1_body",
+              "displayName": "email_1_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_2_subject",
+              "displayName": "email_2_subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_2_body",
+              "displayName": "email_2_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_3_subject",
+              "displayName": "email_3_subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_3_body",
+              "displayName": "email_3_body",
               "required": false,
               "defaultMatch": false,
               "display": true,
@@ -1093,11 +1133,5 @@
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false,
     "binaryMode": "separate"
-  },
-  "staticData": {
-    "node:Schedule Trigger": {
-      "recurrenceRules": []
-    }
-  },
-  "pinData": {}
+  }
 }

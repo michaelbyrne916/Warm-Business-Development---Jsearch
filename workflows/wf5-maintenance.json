@@ -1,0 +1,653 @@
+{
+  "name": "WF5: Maintenance & Dedupe",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "wf5-trigger-schedule",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        304
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "wf5-trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        512
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "wf5-error-handler",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "workflow_name": "WF5: Maintenance",
+            "node_name": "={{ $json.execution.lastNodeExecuted }}",
+            "error_message": "={{ $json.execution.error.message }}",
+            "input_data": "={{ JSON.stringify($json.execution.error.context || {}) }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "wf5-write-error",
+      "name": "Write Error to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        224,
+        720
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Outreach Queue",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "wf5-read-queue",
+      "name": "Read Outreach Queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        224,
+        384
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const allRows = $input.all().map(item => item.json);\nreturn [{ json: { queueRows: allRows } }];"
+      },
+      "id": "wf5-agg-queue",
+      "name": "Aggregate Queue Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const queueRows = $input.first().json.queueRows;\nconst today = new Date();\n\n// Add internal index to each row\nconst rows = queueRows.map((row, i) => ({ ...row, _idx: i }));\n\n// Dedupe within queue: keep most advanced row per email\nconst emailBest = new Map();\nfor (let i = 0; i < rows.length; i++) {\n  const row = rows[i];\n  const email = (row.contact_email || '').toLowerCase().trim();\n  if (!email) continue;\n  if (!emailBest.has(email)) {\n    emailBest.set(email, i);\n  } else {\n    const bestIdx = emailBest.get(email);\n    const bestStage = parseInt(rows[bestIdx].follow_up_stage || 0);\n    const thisStage = parseInt(row.follow_up_stage || 0);\n    if (thisStage > bestStage) {\n      rows[bestIdx]._archive_reason = 'dupe_removed';\n      emailBest.set(email, i);\n    } else {\n      row._archive_reason = 'dupe_removed';\n    }\n  }\n}\n\nconst archiveItems = [];\nconst keepItems = [];\n\nfor (const row of rows) {\n  if (row._archive_reason === 'dupe_removed') {\n    archiveItems.push(row);\n    continue;\n  }\n  const approvalStatus = (row.approval_status || '').toLowerCase().trim();\n  const sentStatus = (row.sent_status || '').toLowerCase().trim();\n  const followUpStage = parseInt(row.follow_up_stage || 0);\n\n  if (sentStatus === 'sent' && followUpStage >= 2) {\n    row._archive_reason = 'completed';\n    archiveItems.push(row);\n    continue;\n  }\n  // Match 'reject' or 'rejected'\n  if (approvalStatus === 'rejected' || approvalStatus === 'reject') {\n    row._archive_reason = 'rejected';\n    archiveItems.push(row);\n    continue;\n  }\n  if (approvalStatus === 'pending' && row.posted_date) {\n    const posted = new Date(row.posted_date);\n    const daysSince = (today - posted) / (1000 * 60 * 60 * 24);\n    if (daysSince > 14) {\n      row._archive_reason = 'stale_pending';\n      archiveItems.push(row);\n      continue;\n    }\n  }\n  // ARCHIVED is a terminal reconciliation state - move it out of the queue.\n  // (HELD is intentionally NOT archived here - it stays in keepItems.)\n  if (approvalStatus === 'archived') {\n    row._archive_reason = 'reconciliation_archived';\n    archiveItems.push(row);\n    continue;\n  }\n  keepItems.push(row);\n}\n\nconst breakdown = {};\nfor (const r of archiveItems) {\n  const reason = r._archive_reason || 'unknown';\n  breakdown[reason] = (breakdown[reason] || 0) + 1;\n}\n\nreturn [{\n  json: {\n    archiveItems,\n    keepItems,\n    stats: {\n      total_in_queue: queueRows.length,\n      archived: archiveItems.length,\n      kept: keepItems.length,\n      breakdown\n    }\n  }\n}];"
+      },
+      "id": "wf5-classify",
+      "name": "Classify and Dedupe",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.archiveItems.length > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "wf5-if-archive",
+      "name": "IF Has Archive Rows",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const archiveItems = $input.first().json.archiveItems;\nreturn archiveItems.map(({ _archive_reason, _idx, ...rest }) => ({\n  json: { ...rest, archived_reason: _archive_reason }\n}));"
+      },
+      "id": "wf5-split-archive",
+      "name": "Split Archive Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Archive",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "id": "wf5-append-archive",
+      "name": "Append to Archive",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        208
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $('Classify and Dedupe').first().json }];"
+      },
+      "id": "wf5-regroup-archive",
+      "name": "Regroup After Archive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Outreach Queue",
+          "mode": "name"
+        }
+      },
+      "id": "wf5-clear-queue",
+      "name": "Clear Queue Data",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2208,
+        384
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Classify and Dedupe').first().json.keepItems.length > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "wf5-if-keep",
+      "name": "IF Has Keep Rows",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const keepItems = $('Classify and Dedupe').first().json.keepItems;\nreturn keepItems.map(({ _idx, _archive_reason, ...rest }) => ({ json: rest }));"
+      },
+      "id": "wf5-split-keep",
+      "name": "Split Keep Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2864,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Outreach Queue",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "id": "wf5-rewrite-queue",
+      "name": "Rewrite Queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        3088,
+        208
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $('Classify and Dedupe').first().json }];"
+      },
+      "id": "wf5-regroup-keep",
+      "name": "Regroup After Keep",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3312,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stats = $('Classify and Dedupe').first().json.stats;\nconst today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });\n\nconst breakdownText = Object.entries(stats.breakdown || {})\n  .map(([reason, count]) => `  â€¢ ${reason}: ${count}`)\n  .join('\\n');\n\nconst subject = `WF5 Daily Maintenance â€” ${stats.archived} archived, ${stats.kept} active | ${today}`;\nconst body = `Daily Maintenance Summary â€” ${today}\\n\\nOutreach Queue Status:\\n  Total rows processed: ${stats.total_in_queue}\\n  Archived: ${stats.archived}\\n  Remaining active: ${stats.kept}\\n\\nArchive breakdown:\\n${breakdownText || '  (none)'}\\n\\n---\\nAutomated report from WF5: Maintenance & Dedupe.`;\n\nreturn [{ json: { email_subject: subject, email_body: body } }];"
+      },
+      "id": "wf5-compile-summary",
+      "name": "Compile Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $vars.GMAIL_SENDER }}",
+        "subject": "={{ $json.email_subject }}",
+        "emailType": "text",
+        "message": "={{ $json.email_body }}",
+        "options": {}
+      },
+      "id": "wf5-send-summary",
+      "name": "Send Summary Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3744,
+        384
+      ],
+      "webhookId": "aca603f4-4283-44b0-b26e-430236dbf53f",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "IYY5ghfJsIOI6umh",
+          "name": "Gmail account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "content": "## WF5: Maintenance & Dedupe\n\nRuns daily at 6am to keep the Outreach Queue clean.\n\n**Flow:**\n1. Read all rows from Outreach Queue\n2. Read Archive tab (for dedupe checking)\n3. Classify rows: completed, rejected, stale, dupes\n4. Append archive candidates to Archive tab\n5. Clear queue data rows\n6. Rewrite only active/keep rows back\n7. Send daily summary email\n\n**Archive reasons:**\n- completed: stage 2 sent\n- rejected: approval_status=rejected\n- stale_pending: pending + posted >14 days ago\n- dupe_removed: duplicate email in queue\n- already_contacted: email exists in Archive\n\n**Schedule:** Daily at 6:00 AM\n\n**Env vars needed:**\n- GOOGLE_SHEETS_ID\n- GMAIL_SENDER",
+        "height": 380,
+        "width": 300
+      },
+      "id": "wf5-sticky",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $vars.GOOGLE_SHEETS_ID }}/values/Outreach%20Queue!A1:V1?valueInputOption=RAW",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "{\"range\": \"Outreach Queue!A1:V1\", \"majorDimension\": \"ROWS\", \"values\": [[\"opportunity_id\", \"contact_name\", \"company_name\", \"contact_email\", \"job_title\", \"posted_date\", \"source_url\", \"email_1_subject\", \"email_1_body\", \"email_2_subject\", \"email_2_body\", \"email_3_subject\", \"email_3_body\", \"approval_status\", \"sent_status\", \"sent_timestamp\", \"follow_up_stage\", \"scheduled_date\", \"company_domain\", \"personalization_angle\", \"recipient_reasoning\", \"scaling_hypothesis\"]]}",
+        "options": {}
+      },
+      "id": "wf5-restore-headers",
+      "name": "Restore Queue Headers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2432,
+        384
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Outreach Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Outreach Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Outreach Queue": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Queue Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Queue Rows": {
+      "main": [
+        [
+          {
+            "node": "Classify and Dedupe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify and Dedupe": {
+      "main": [
+        [
+          {
+            "node": "IF Has Archive Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Archive Rows": {
+      "main": [
+        [
+          {
+            "node": "Split Archive Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Clear Queue Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Archive Items": {
+      "main": [
+        [
+          {
+            "node": "Append to Archive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append to Archive": {
+      "main": [
+        [
+          {
+            "node": "Regroup After Archive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Regroup After Archive": {
+      "main": [
+        [
+          {
+            "node": "Clear Queue Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear Queue Data": {
+      "main": [
+        [
+          {
+            "node": "Restore Queue Headers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Keep Rows": {
+      "main": [
+        [
+          {
+            "node": "Split Keep Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Compile Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Keep Items": {
+      "main": [
+        [
+          {
+            "node": "Rewrite Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rewrite Queue": {
+      "main": [
+        [
+          {
+            "node": "Regroup After Keep",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Regroup After Keep": {
+      "main": [
+        [
+          {
+            "node": "Compile Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Summary": {
+      "main": [
+        [
+          {
+            "node": "Send Summary Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Handler": {
+      "main": [
+        [
+          {
+            "node": "Write Error to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Queue Headers": {
+      "main": [
+        [
+          {
+            "node": "IF Has Keep Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "binaryMode": "separate"
+  }
+}

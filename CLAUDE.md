@@ -138,6 +138,15 @@ When using `n8n_update_partial_workflow`, the correct structure is:
 | 2026-05-13 | WF2/4/5/7: All | ACTION 7: Applied `retryOnFail: true, maxTries: 3, waitBetweenTries: 10000` to 21 Sheets write nodes: WF2 (7 nodes), WF4 (7 nodes), WF5 (3 nodes), WF7 (4 nodes: n11, n19, n21, n23). |
 | 2026-05-13 | WF6: Warm to Cold | ACTION 8: Added explicit REJECT guard in node n05 (`Filter + Join + Dedup`) — after `sentStatus !== 'sent'` check, added `if ((row.approval_status || '').toUpperCase() === 'REJECT') continue;`. Belt-and-suspenders against WF5 failing to archive REJECTs before Sunday 5am. Validation: 0 new errors (5 pre-existing false positives unchanged). |
 | 2026-05-20 | WF-RECON Phase C | Built read-only reconciliation preview workflow `CCQu4oRXAXzQ32Rl` (6 nodes: Manual Trigger → 4 sheet reads → Classify Contacts Code node). No writes wired. Classifies 566 non-rejected OQ rows into 5 buckets keyed off Sent Log truth. AmEx added to Excluded Companies (row 246, total 245). dedup_check confirmed 497 warm_complete contacts are 100% net-new to Cold BD Sequence Tracker (0 overlap with 9,079 unique tracker emails). Assertion PASS (566 == 566). Phase E writes pending Mike's go-ahead. **WF4 remains DEACTIVATED.** |
+| 2026-05-20 | WF-RECON Phase E | Built and ran reconciliation write workflow `EspXcizSIo9hSLcN` (22 nodes, exec 9843, 25.6s, PASS). 5 branches executed: A (3 mid_sequence scheduled_date→2026-05-25), B (38 fresh_keep reconciliation_status='reviewed_keep' after OQ col_26 renamed to reconciliation_status), C (24 excluded_archive approval_status='ARCHIVED'), D (4 held_campaign_overlap approval_status='HELD'), E (497 warm_complete appended to Cold BD Sequence Tracker). Verification: pre_tracker=9082, post_tracker=9579, delta=+497. **Option D chosen for Branch E Write 2** — skipped OQ field update for warm_complete; relied on Sequence Tracker email dedup as the WF6 re-migration guard. |
+| 2026-05-20 | WF4 | Reactivated post-Phase E. Schedule (8/10/12/2/4pm PDT Mon-Fri) resumed. |
+| 2026-05-20 | WF4 exec 9848 | Manual run, 566 OQ rows read, 21 approved+unsent reached Suppression Gate, **all 21 blocked by Suppression List** (legitimate 30-day windows from prior real sends). Zero emails sent, 21 entries to Errors tab. Diagnosis: the 21 were part of the 497 warm_complete bucket whose OQ remained stale per Phase E Option D. |
+| 2026-05-20 | WF-RECON Phase E.5 | Closed the Option D gap. One-shot workflow `tjBavdMpdfqt03FF` (12 nodes, exec 9949, 14.6s, PASS) updated all 497 warm_complete OQ rows to `approval_status='ARCHIVED'`. Verify: warm_complete_now_archived=497, still_not_archived=0, post-archive total ARCHIVED=521 (24 from Phase E + 497 from E.5). Of the 497, only 21 were 'approved' pre-E.5; 476 were 'pending' (would never have matched WF4's filter). Workflow deleted post-run. |
+| 2026-05-20 | WF4 exec 9950 | First post-E.5 scheduled run (23:00 UTC / 4pm PDT). Filter result: **0 approved+unsent+due rows**. Chain halted at Attach Suppression List with 0 output items. Zero sends, zero suppression-blocked entries, zero Errors tab writes. **Suppression noise eliminated as designed.** |
+| 2026-05-22 | WF5: Maintenance | Fix: `Classify and Dedupe` node (`wf5-classify`) — added an `approval_status='archived'` → archive path so reconciliation-archived rows leave the queue. `HELD` rows intentionally left in `keepItems` (not archived). |
+| 2026-05-22 | WF2: Contact Discovery | Fix: added a dedup check (Sent Log + Suppression List) on the automated path before the Contacts-sheet write; already-contacted contacts are skipped and logged to the Errors tab. Closes the re-contamination vector — resolves the 2026-05-19 "Cause 2" open item (WF2 suppression pre-filter). Manual reconciliation branch untouched. |
+| 2026-05-22 | WF4: Approved Send | Fix: `Write Follow-ups to Queue` column map corrected — phantom `email_subject`/`email_body` columns (which existed on no OQ schema) replaced with the six real OQ columns `email_1/2/3_subject` + `email_1/2/3_body`. Follow-up rows now carry real email content. |
+| 2026-05-22 | One-shots (run + archived) | `OcCiCbOgE3rrvyEl` (exec 10431) — 530 re-contaminated OQ rows archived. `YzE12kHEq6qX4DDR` (exec 10451) — 212 WF3 parsing-failure rows archived. `KjgSu0Rt36xZuGvB` (exec 10465) — 130 junk rows deleted (cleanup of a failed recovery append). `sR4yW5v1i8gJyJEJ` (exec 10469, Google Sheets `values:batchUpdate`) — 96 blank follow-up rows recovered, 576 cells written, `remaining_damaged_in_oq=0`. All four are archived in n8n (`isArchived`) and inactive. |
 
 ### 2026-05-19 — WF4 phantom follow-up incident
 
@@ -181,9 +190,40 @@ When using `n8n_update_partial_workflow`, the correct structure is:
   - **WF2 future ticket:** Block abuse/fraud/noreply local-parts (`fraud`, `abuse`, `phish`, `spam`, `dmarc`, `postmaster`, `noreply`) in contact discovery — caught `ukemailfraud@americanexpress.com` only via post-hoc company exclusion. Debounce + LLM verdict both marked it `Safe to Send / KEEP`.
   - **FUTURE TICKET (carry-over):** Cross-campaign suppression registry — candidate-marketing overlap discovered 2026-05-19.
 
+### 2026-05-20 (session 3) — Phase E + E.5 reconciliation arc complete; WF4 reactivated clean
+
+- **Phase E** (`EspXcizSIo9hSLcN`, exec 9843, PASS): all 5 branches executed. Cold BD Sequence Tracker 9,082 → 9,579 (+497 net new). OQ updates: 3 mid_sequence rescheduled to 2026-05-25 (Toll/52TEN/Vanguard), 38 fresh_keep stamped `reconciliation_status='reviewed_keep'` (OQ col_26 renamed to `reconciliation_status` manually by Mike), 24 excluded_archive → ARCHIVED, 4 held_campaign_overlap → HELD. **Branch E Write 2 skipped per Option D** — relied on WF6's Sequence Tracker email dedup (filter 5) to block re-migration. Suppression-list write for HELD rows deferred (out of scope).
+
+- **WF4 reactivation diagnostic (exec 9848):** Mike reactivated WF4 between Phase E and Phase E.5. Manual run caught 21 approved+unsent OQ rows. ALL 21 were already in the Suppression List (3–4 entries each, 30-day windows from prior real sends). Suppression Gate blocked all 21. Zero emails sent.
+
+- **False-premise check + reject:** Initial hypothesis was that the 21 suppressions might be phantoms from the desync incident. Cross-reference workflow `yzmUCkig5lZdSwVt` (built, executed, deleted) verified each of the 21 has 3-4 real Sent Log entries. Suppression entries are legitimate. Zero rows deleted from Suppression List. No harm done. Workflow deleted post-confirmation.
+
+- **Root cause:** The 21 are a subset of the 497 warm_complete contacts. Phase E migrated them to Cold BD but left OQ `approval_status='approved'`/'pending', `sent_status='unsent'`, `follow_up_stage='0'` because of Option D. WF4 saw them as sendable; Suppression Gate caught the duplicate send attempts. Steady-state Errors-tab noise.
+
+- **Phase E.5** (`tjBavdMpdfqt03FF`, exec 9949, PASS, workflow deleted post-run): one-shot updated all 497 warm_complete OQ rows to `approval_status='ARCHIVED'`. Pre-state of the 497 bucket: 21 'APPROVED', 476 'PENDING'. Post-state OQ: 521 ARCHIVED (24+497), 3 APPROVED (Toll/52TEN/Vanguard mid_sequence, future scheduled_date), 4 HELD.
+
+- **WF4 first post-E.5 scheduled run (exec 9950, 23:00 UTC):** Schedule-triggered. Read 566 OQ → filter to **0 approved+unsent+due**. Chain halted at Attach Suppression List with 0 output items. Zero sends, zero suppression-blocked entries, zero Errors tab writes. Noise eliminated.
+
+- **End state:**
+  - OQ: 566 rows. 3 'approved' (mid_sequence due 2026-05-25), 4 'HELD', 521 'ARCHIVED', ~38 'pending' (fresh_keep awaiting manual approval).
+  - Sent Log: 4,268 rows (source of truth, unchanged through arc).
+  - Suppression List: 4,220 rows (all legitimate, none deleted).
+  - Cold BD Sequence Tracker: 9,579 rows.
+  - WF4: ACTIVE. Next email send: 2026-05-25 (3 mid_sequence contacts).
+
+- **Open follow-ups (non-blocking):**
+  - Cross-campaign suppression registry (carry-over from 2026-05-19).
+  - **WF6 filter hardening:** WF6 only recognizes `approval_status='REJECT'` as exclusion. `ARCHIVED` and `HELD` are NOT in WF6's filter — currently safe because warm_complete rows are in Sequence Tracker (dedup filter 5 catches them) and excluded/held rows have other gate failures. Worth a future pass to add `ARCHIVED`/`HELD` to WF6's REJECT guard.
+  - WF2 abuse-pattern email filter (carry-over from session 2).
+
 ---
 
 ## Key Learnings
 
 - **n8n silent-halt pattern:** `runOnceForAllItems` Code nodes do **not** execute when the upstream node outputs 0 items. Assert/safety nodes that rely on `$input.all()` are bypassed entirely on empty input (no error, execution just ends "success"). Fix: reference an upstream node explicitly, e.g. `$('Upstream Node').all().length`, so the safety node fires regardless of its direct input count. Apply to all future safety/assert nodes.
 - **Follow-up scheduling rule:** Nodes that schedule downstream actions (follow-ups, retries, notifications) must source their input from a node that is **post-action-success**, never from the pre-gate queue. Sourcing pre-gate means scheduling actions for items that may never have actioned (the root cause of the 2026-05-19 WF4 phantom follow-up incident).
+- **Option D trade-off — migrate without updating source = stale source:** When reconciling between systems, writing to the destination without updating the source row's status leaves stale source rows that re-trigger downstream workflows. Phase E's "skip Write 2 for warm_complete" was correct for blocking COLD re-migration (Sequence Tracker dedup catches it) but didn't cover WARM re-attempt by WF4. Lesson: when migrating between systems, also update source to a terminal state (e.g., `ARCHIVED`) even if the destination has its own dedup. Belt AND suspenders.
+- **Suppression Gate as effective last-line-of-defense:** WF4's Suppression Gate caught 21 duplicate-send attempts during the gap between Phase E and Phase E.5 — zero emails sent in error despite the OQ desync. Layered safety (filter → suppression → DRY_RUN → retryOnFail) is worth the complexity. At least one layer catches each class of bug.
+- **`approval_status` taxonomy:** WF4 only sends when `approval_status='approved'` (lowercased compare). Other values are ignored: `pending` (default fresh leads, gates until manual approval), `ARCHIVED` (completed/migrated), `HELD` (campaign-overlap pause), `REJECT` (hard-rejected). Use ARCHIVED for terminal "done" state.
+- **WF4 DRY_RUN gate:** `$vars.DRY_RUN !== 'true'` (string `notEquals`). True branch (default) sends live; false branch logs only. Set env var `DRY_RUN='true'` to pause sends without deactivating the workflow.
+- **Before deleting suppression entries, cross-reference Sent Log:** Suppression entries with empty `company_domain` can have many siblings per email (the 21 contacts in question had 68 total entries across them, avg 3.2 each — written by WF4 across multiple stages of the original sequence). All were legitimate. Always validate against source-of-truth Sent Log before deleting suppressions.

@@ -1,0 +1,1884 @@
+{
+  "name": "WF2: Contact  Discovery",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "wf2-trigger-exec",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        304
+      ],
+      "disabled": false
+    },
+    {
+      "parameters": {},
+      "id": "wf2-trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://company.clearbit.com/v2/companies/find?domain={{ encodeURIComponent($json.company_domain) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.CLEARBIT_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "wf2-clearbit",
+      "name": "Clearbit Company Enrichment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        448,
+        384
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\nconst originalItems = $('Preserve Opportunity Data').all();\n\nfor (let i = 0; i < $input.all().length; i++) {\n  const cb = $input.all()[i].json;\n  const orig = originalItems[i] ? originalItems[i].json : {};\n  const clearbitOk = !!cb.name;\n\n  results.push({ json: {\n    opportunity_id: orig.opportunity_id || '',\n    company_name: (clearbitOk ? cb.name : null) || orig.company_name || '',\n    company_domain: (clearbitOk ? cb.domain : null) || orig.company_domain || '',\n    job_title: orig.job_title || '',\n    job_description: orig.job_description || '',\n    location: orig.location || '',\n    seniority: orig.seniority || '',\n    skills: orig.skills || '',\n    match_score: orig.match_score || '',\n    source_url: orig.source_url || '',\n    source_name: orig.source_name || '',\n    employment_type: orig.employment_type || '',\n    posted_date: orig.posted_date || '',\n    date_found: orig.date_found || '',\n    company_classification: orig.company_classification || '',\n    company_classification_reason: orig.company_classification_reason || '',\n    status: orig.status || '',\n    company_summary: clearbitOk ? (cb.description || '').substring(0, 500) : '',\n    company_industry: clearbitOk ? (cb.category?.industry || cb.category?.sector || '') : '',\n    company_employee_count: clearbitOk ? (cb.metrics?.employees || 0) : 0,\n    company_annual_revenue: clearbitOk ? (cb.metrics?.annualRevenue || 0) : 0,\n    _clearbit_success: clearbitOk\n  }});\n}\nreturn results;"
+      },
+      "id": "wf2-merge-clearbit",
+      "name": "Merge Company Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\nconst TITLE_PRIORITY = {\n  engineering: ['Engineering Manager', 'Director of Engineering', 'VP of Engineering', 'VP Engineering', 'CTO', 'Head of Engineering', 'Tech Lead Manager', 'Software Development Manager', 'Principal Engineer'],\n  data: ['Director of Data', 'VP of Data', 'Head of Data', 'Data Engineering Manager', 'Director of Analytics', 'VP Analytics', 'Chief Data Officer'],\n  product: ['VP of Product', 'Director of Product', 'Head of Product', 'CPO', 'Product Director', 'VP Product Management'],\n  operations: ['COO', 'VP Operations', 'Director of Operations', 'Head of Operations', 'Operations Director'],\n  finance: ['CFO', 'VP Finance', 'Director of Finance', 'Controller', 'Head of Finance'],\n  default: ['Director', 'VP', 'Vice President', 'Head of', 'Department Head', 'Talent Acquisition Manager', 'Recruiting Manager', 'HR Manager']\n};\n\nconst MAX_ANNUAL_REVENUE = 100000000;\nconst MAX_EMPLOYEES = 1000;\n\nfor (const item of $input.all()) {\n  const job = { ...item.json };\n  const revenue = job.company_annual_revenue || 0;\n  const employees = job.company_employee_count || 0;\n  if (revenue > 0 && revenue > MAX_ANNUAL_REVENUE) continue;\n  if (revenue === 0 && employees > MAX_EMPLOYEES) continue;\n\n  const titleLower = (job.job_title || '').toLowerCase();\n  const descLower = (job.job_description || '').toLowerCase();\n  let domain = 'default';\n  if (/engineer|developer|devops|sre|platform|infrastructure/.test(titleLower)) domain = 'engineering';\n  else if (/data|analytics|ml|machine learning|ai/.test(titleLower)) domain = 'data';\n  else if (/product|ux|design/.test(titleLower)) domain = 'product';\n  else if (/operations|ops/.test(titleLower)) domain = 'operations';\n  else if (/finance|accounting|financial/.test(titleLower)) domain = 'finance';\n\n  job._title_priority = [...(TITLE_PRIORITY[domain] || []), ...TITLE_PRIORITY.default];\n  job._hiring_signals = [];\n  if (/growing|scaling|hypergrowth|series [a-e]|recently funded/.test(descLower)) job._hiring_signals.push('Company in growth phase');\n  if (/remote|hybrid|work from home/.test(descLower)) job._hiring_signals.push('Offers remote/hybrid work');\n  if (/urgent|immediate|asap|start immediately/.test(descLower)) job._hiring_signals.push('Urgent hire needed');\n  if (/contract|c2h|contract.to.hire/.test(descLower)) job._hiring_signals.push('Open to contract/C2H');\n  job._tech_stack = ['react','node','python','java','go','rust','typescript','kubernetes','aws','azure','gcp','terraform','postgres','mysql','mongodb'].filter(t => descLower.includes(t));\n  job._role_domain = domain;\n  results.push({ json: job });\n}\nreturn results;"
+      },
+      "id": "wf2-hiring-signals",
+      "name": "Extract Hiring Signals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.company_domain ? 'https://api.hunter.io/v2/domain-search?domain=' + encodeURIComponent($json.company_domain) + '&limit=3&offset=' + ($json.hunter_offset || 0) + '&api_key=' + $vars.HUNTER_API_KEY : 'https://api.hunter.io/v2/domain-search?company=' + encodeURIComponent($json.company_name) + '&limit=3&offset=' + ($json.hunter_offset || 0) + '&api_key=' + $vars.HUNTER_API_KEY }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "id": "wf2-hunter-search",
+      "name": "Hunter.io Domain Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1104,
+        384
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const opportunityItems = $('Compute Hunter Offset').all();\n\n// Build a set of emails already saved to the Contacts tab so we never re-select\n// the same person — covers both cross-run and same-run (multiple opps, same company).\nconst existingContacts = $('Read All Contacts').all().filter(c => c.json.company_name);\nconst existingEmails = new Set(\n  existingContacts.map(c => (c.json.contact_email || '').toLowerCase()).filter(Boolean)\n);\n\nconst results = [];\n\nfor (let idx = 0; idx < $input.all().length; idx++) {\n  const hunterData = $input.all()[idx].json;\n  const opportunity = opportunityItems[idx] ? opportunityItems[idx].json : {};\n  const emails = hunterData.data?.emails || [];\n  const titlePriority = opportunity._title_priority || [];\n\n  if (emails.length === 0) {\n    results.push({ json: {\n      ...opportunity,\n      contact_name: '', contact_title: '', contact_email: '', contact_phone: '', linkedin_url: '',\n      source_of_contact: opportunity.company_domain ? 'hunter.io (no results)' : 'hunter.io (no domain)',\n      confidence_score: 0,\n      contact_reasoning: 'No contacts found via Hunter.io domain search'\n    }});\n    continue;\n  }\n\n  // Filter out emails already in the Contacts tab before scoring\n  const newEmails = emails.filter(e => !existingEmails.has((e.value || '').toLowerCase()));\n\n  if (newEmails.length === 0) {\n    results.push({ json: {\n      ...opportunity,\n      contact_name: '', contact_title: '', contact_email: '', contact_phone: '', linkedin_url: '',\n      source_of_contact: 'hunter.io (all contacts already known)',\n      confidence_score: 0,\n      contact_reasoning: 'All Hunter.io contacts for this company are already in the Contacts tab'\n    }});\n    continue;\n  }\n\n  const scored = newEmails.map(email => {\n    let score = 30;\n    const title = (email.position || '').toLowerCase();\n    for (let i = 0; i < titlePriority.length; i++) {\n      if (title.includes(titlePriority[i].toLowerCase())) { score += Math.max(10, 50 - i * 5); break; }\n    }\n    if (email.confidence) score += Math.floor(email.confidence / 10);\n    if (['director','vp','head','manager'].some(t => title.includes(t))) score += 10;\n    return { ...email, _score: score };\n  });\n  scored.sort((a, b) => b._score - a._score);\n  const best = scored[0];\n\n  // Add to existingEmails so next opp in this same run won't re-select this person\n  existingEmails.add((best.value || '').toLowerCase());\n\n  results.push({ json: {\n    ...opportunity,\n    contact_name: `${best.first_name || ''} ${best.last_name || ''}`.trim(),\n    contact_title: best.position || '',\n    contact_email: best.value || '',\n    contact_phone: '',\n    linkedin_url: best.linkedin || '',\n    source_of_contact: 'hunter.io',\n    confidence_score: best._score,\n    contact_reasoning: `Best match from ${newEmails.length} new contacts: title score + Hunter confidence ${best.confidence || 0}%`\n  }});\n}\nreturn results;\n"
+      },
+      "id": "wf2-score-contacts",
+      "name": "Score & Rank Contacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "conf-check",
+              "leftValue": "={{ $json.confidence_score }}",
+              "rightValue": 70,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "wf2-confidence-gate",
+      "name": "Confidence Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        384
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "wf2-merge-contact-paths",
+      "name": "Merge Contact Paths",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1984,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Contacts",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "opportunity_id": "={{ $json.opportunity_id }}",
+            "company_name": "={{ $json.company_name }}",
+            "contact_name": "={{ $json.contact_name }}",
+            "contact_title": "={{ $json.contact_title }}",
+            "contact_email": "={{ $json.contact_email }}",
+            "hunter_confidence": "={{ $json.confidence_score }}",
+            "linkedin_url": "={{ $json.linkedin_url }}",
+            "found_date": "={{ $now.toISODate() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "opportunity_id",
+              "displayName": "opportunity_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company_name",
+              "displayName": "company_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "contact_name",
+              "displayName": "contact_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "contact_title",
+              "displayName": "contact_title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "contact_email",
+              "displayName": "contact_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "hunter_confidence",
+              "displayName": "hunter_confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "linkedin_url",
+              "displayName": "linkedin_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "found_date",
+              "displayName": "found_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf2-write-contacts",
+      "name": "Write to Contacts Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2208,
+        384
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().filter(item => \n  !!item.json.opportunity_id &&\n  !!item.json.contact_email &&\n  (item.json.confidence_score || item.json.hunter_confidence || 0) >= 70\n);"
+      },
+      "id": "wf2-filter-valid-opp",
+      "name": "Filter Valid Opportunity ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2320,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Opportunities",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "opportunity_id": "={{ $json.opportunity_id }}",
+            "status": "contact_found",
+            "company_summary": "={{ $json.company_summary }}"
+          },
+          "matchingColumns": [
+            "opportunity_id"
+          ],
+          "schema": [
+            {
+              "id": "opportunity_id",
+              "displayName": "opportunity_id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company_summary",
+              "displayName": "company_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf2-update-opp-status",
+      "name": "Update Opportunity Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2544,
+        384
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {},
+      "id": "wf2-error-handler",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow_name": "WF2: Contact Discovery",
+            "node_name": "={{ $json.execution.lastNodeExecuted }}",
+            "error_message": "={{ $json.execution.error.message }}",
+            "input_data": "={{ JSON.stringify($json.execution.error.context || {}) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp ",
+              "displayName": "timestamp ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "workflow_name",
+              "displayName": "workflow_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "node_name",
+              "displayName": "node_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "input_data",
+              "displayName": "input_data",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "wf2-write-error",
+      "name": "Write Error to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        224,
+        720
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "content": "## WF2: Contact Discovery\n\n**Main Flow**: Read Approved -> Preserve -> Clearbit -> Merge -> Extract Signals -> Read All Contacts (alwaysOutputData) -> Compute Hunter Offset -> Hunter.io (with offset) -> Score & Rank -> Confidence Gate -> Write Contacts -> Update Opportunity -> WF3\n\n**Archive Branch**: Schedule only - archives unchecked rows after 2 days.\n**Reject Branch**: Manual trigger - archives + deletes rows marked 'reject'.\n\n**Offset logic**: Read All Contacts has alwaysOutputData=true so empty Contacts tab still passes 1 placeholder item. Compute Hunter Offset filters it out and outputs N items (1 per opportunity) with correct hunter_offset."
+      },
+      "id": "wf2-sticky",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "T1jTXreAw0uZ2TOD",
+        "options": {}
+      },
+      "id": "wf2-trigger-outreach",
+      "name": "Trigger Outreach Draft",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        2848,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function isApproved(v) {\n  if (!v && v !== 0) return false;\n  if (v === true || v === 1) return true;\n  const s = String(v).trim().toLowerCase();\n  return ['true', 'approved', 'yes', '1'].includes(s);\n}\n\nreturn $input.all()\n  .filter(item => isApproved(item.json.approved))\n  .map(item => ({ json: { ...item.json } }));"
+      },
+      "id": "wf2-preserve-opportunity",
+      "name": "Preserve Opportunity Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => ({\n  json: { ...item.json, contact_status: 'contact_found' }\n}));"
+      },
+      "id": "wf2-set-contact-found",
+      "name": "Set Contact Found",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => ({\n  json: { ...item.json, contact_status: 'needs_review' }\n}));"
+      },
+      "id": "wf2-set-needs-review",
+      "name": "Set Needs Review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const allContacts = $('Score & Rank Contacts').all();\n\nreturn $input.all().map((item) => {\n  const oppId = item.json.opportunity_id;\n  const full = allContacts.find(c => c.json.opportunity_id === oppId);\n  return { json: { ...(full ? full.json : {}), ...item.json } };\n});"
+      },
+      "id": "wf2-prepare-wf3-payload",
+      "name": "Prepare WF3 Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 19 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "wf2-trigger-schedule",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Opportunities",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": []
+        },
+        "options": {},
+        "combineFilters": "AND"
+      },
+      "id": "wf2-read-approved",
+      "name": "Read Approved Opportunities",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        224,
+        208
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Opportunities",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": []
+        },
+        "options": {}
+      },
+      "id": "wf2-read-unchecked",
+      "name": "Read Unchecked Opportunities",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        224,
+        704
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const cutoff = new Date();\ncutoff.setDate(cutoff.getDate() - 2);\nconst cutoffStr = cutoff.toISOString().split('T')[0];\n\nfunction isApproved(v) {\n  if (!v && v !== 0) return false;\n  if (v === true || v === 1) return true;\n  const s = String(v).trim().toLowerCase();\n  return ['true', 'approved', 'yes', '1'].includes(s);\n}\n\nfunction isRejected(v) {\n  const s = String(v || '').trim().toLowerCase();\n  return s === 'reject' || s === 'rejected';\n}\n\nreturn $input.all().filter(item => {\n  const approved = item.json.approved;\n  const addedDate = item.json.added_date || '';\n  return !isApproved(approved) && !isRejected(approved) && addedDate && addedDate <= cutoffStr;\n});"
+      },
+      "id": "wf2-filter-old-unchecked",
+      "name": "Filter Older Than 2 Days",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => ({\n  json: { ...item.json, archived_reason: 'not_approved' }\n}));"
+      },
+      "id": "wf2-prep-archive",
+      "name": "Prep Archive Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Archive",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "wf2-archive-unchecked",
+      "name": "Archive Unchecked Opportunities",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        896,
+        704
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Opportunities",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "opportunity_id": "={{ $json.opportunity_id }}",
+            "status": "archived"
+          },
+          "matchingColumns": [
+            "opportunity_id"
+          ],
+          "schema": [
+            {
+              "id": "opportunity_id",
+              "displayName": "opportunity_id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf2-mark-archived",
+      "name": "Mark Archived in Opportunities",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1120,
+        704
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "id": "wf2-filter-rejected",
+      "name": "Filter Rejected",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        912
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().filter(item => {\n  const approved = String(item.json.approved || '').trim().toLowerCase();\n  return approved === 'reject' || approved === 'rejected';\n});"
+      }
+    },
+    {
+      "id": "wf2-prep-reject-archive",
+      "name": "Prep Reject Archive Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        912
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().map(item => ({\n  json: { ...item.json, archived_reason: 'rejected' }\n}));"
+      }
+    },
+    {
+      "id": "wf2-archive-rejected",
+      "name": "Archive Rejected Opportunities",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        896,
+        912
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Archive",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "id": "wf2-mark-rejected",
+      "name": "Mark Rejected in Opportunities",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1120,
+        912
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Opportunities",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "opportunity_id": "={{ $json.opportunity_id }}",
+            "status": "archived"
+          },
+          "matchingColumns": [
+            "opportunity_id"
+          ],
+          "schema": [
+            {
+              "id": "opportunity_id",
+              "displayName": "opportunity_id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "id": "wf2-sort-rejected",
+      "name": "Sort Descending by Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        912
+      ],
+      "parameters": {
+        "jsCode": "return $('Filter Rejected').all()\n  .sort((a, b) => (b.json.row_number || 0) - (a.json.row_number || 0))\n  .map(item => ({ json: { row_number: item.json.row_number } }));"
+      }
+    },
+    {
+      "id": "wf2-delete-rejected-rows",
+      "name": "Delete Rejected Rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1568,
+        912
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "delete",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Opportunities",
+          "mode": "name"
+        },
+        "toDelete": "rows",
+        "startIndex": "={{ $json.row_number }}",
+        "numberToDelete": 1
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "wf2-read-all-contacts",
+      "name": "Read All Contacts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        880,
+        200
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Contacts",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": []
+        },
+        "options": {},
+        "combineFilters": "AND"
+      }
+    },
+    {
+      "id": "wf2-compute-hunter-offset",
+      "name": "Compute Hunter Offset",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        200
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Read existing contacts - filter out empty placeholder from alwaysOutputData\nconst contacts = $('Read All Contacts').all().filter(c => c.json.company_name);\n\n// Skip opportunities already written to Contacts tab (prevents duplicates on re-runs)\nconst alreadyContacted = new Set(contacts.map(c => c.json.opportunity_id).filter(Boolean));\n\n// Deduplicate within this batch by opportunity_id (handles duplicate rows in Opportunities tab)\nconst seenInBatch = new Set();\nconst opps = $input.all().filter(opp => {\n  const id = opp.json.opportunity_id;\n  if (!id || alreadyContacted.has(id) || seenInBatch.has(id)) return false;\n  seenInBatch.add(id);\n  return true;\n});\n\nif (opps.length === 0) return [];\n\n// Track per-company offset within this batch so multiple opps for same company\n// each get a unique offset and Hunter returns a different person for each.\nconst batchCompanyOffsets = {};\n\nreturn opps.map(oppItem => {\n  const opp = oppItem.json;\n  const oppName = (opp.company_name || '').toLowerCase().trim();\n  const oppDomain = (opp.company_domain || '').toLowerCase().trim();\n\n  const existingCount = contacts.filter(c => {\n    const cDomain = (c.json.company_domain || '').toLowerCase().trim();\n    const cName = (c.json.company_name || '').toLowerCase().trim();\n    if (oppDomain && cDomain) return cDomain === oppDomain;\n    return cName === oppName;\n  }).length;\n\n  const companyKey = oppDomain || oppName;\n\n  // First opp for this company in the batch starts at existingCount;\n  // each additional opp in the same run increments by 1.\n  if (!(companyKey in batchCompanyOffsets)) {\n    batchCompanyOffsets[companyKey] = existingCount;\n  }\n\n  const hunter_offset = batchCompanyOffsets[companyKey];\n  batchCompanyOffsets[companyKey]++;\n\n  return { json: { ...opp, hunter_offset } };\n});\n"
+      }
+    },
+    {
+      "id": "wf2-read-contacts-manual",
+      "name": "Read Contacts for Manual",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        224,
+        1120
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Contacts",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "wf2-read-outreach-queue",
+      "name": "Read Outreach Queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        448,
+        1120
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Outreach Queue",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": []
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "wf2-find-unprocessed",
+      "name": "Find Unprocessed Contacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        1120
+      ],
+      "parameters": {
+        "jsCode": "// Contacts with a valid manually-added or Hunter-found email\nconst contacts = $('Read Contacts for Manual').all().filter(c =>\n  c.json.opportunity_id && c.json.contact_email\n);\n\n// Opportunity IDs already drafted in Outreach Queue\nconst queuedIds = new Set(\n  $('Read Outreach Queue').all().map(r => r.json.opportunity_id).filter(Boolean)\n);\n\n// All opportunity rows for enrichment (job_title, domain, location etc.)\nconst oppMap = {};\n$('Read Approved Opportunities').all().forEach(o => {\n  if (o.json.opportunity_id) oppMap[o.json.opportunity_id] = o.json;\n});\n\n// Only contacts not yet in Outreach Queue\nconst unprocessed = contacts.filter(c => !queuedIds.has(c.json.opportunity_id));\nif (unprocessed.length === 0) return [];\n\nreturn unprocessed.map(c => {\n  const opp = oppMap[c.json.opportunity_id] || {};\n  return { json: {\n    opportunity_id: c.json.opportunity_id,\n    company_name:   c.json.company_name  || opp.company_name  || '',\n    company_domain: opp.company_domain   || '',\n    job_title:      opp.job_title        || '',\n    location:       opp.location         || '',\n    seniority:      opp.seniority        || '',\n    skills:         opp.skills           || '',\n    contact_name:   c.json.contact_name  || '',\n    contact_title:  c.json.contact_title || '',\n    contact_email:  c.json.contact_email || '',\n    linkedin_url:   c.json.linkedin_url  || '',\n    source_url:     opp.source_url       || '',\n    company_classification: opp.company_classification || '',\n    company_summary:        opp.company_summary        || '',\n    _hiring_signals: [], _tech_stack: [], _role_domain: 'default'\n  }};\n});"
+      }
+    },
+    {
+      "id": "wf2-trigger-wf3-manual",
+      "name": "Trigger WF3 Manual",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        896,
+        1120
+      ],
+      "parameters": {
+        "workflowId": "T1jTXreAw0uZ2TOD",
+        "options": {}
+      }
+    },
+    {
+      "id": "wf2-apollo-gate",
+      "name": "Apollo Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        620
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "apollo-gate-check",
+              "leftValue": "={{ $json.confidence_score }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "wf2-apollo-search",
+      "name": "Apollo Contacts Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        760
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apollo.io/v1/contacts/search",
+        "sendBody": true,
+        "contentType": "raw",
+        "body": "={{ $json._apollo_body }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-api-key",
+              "value": "ucgx2MPpe5_KSO57vS6qXg"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "wf2-parse-apollo",
+      "name": "Parse Apollo Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        760
+      ],
+      "parameters": {
+        "jsCode": "const apolloResponses = $input.all();\nconst opportunities = $('Prepare Apollo Request').all();\nconst results = [];\n\nfor (let idx = 0; idx < apolloResponses.length; idx++) {\n  const apolloResp = apolloResponses[idx].json;\n  const opportunity = opportunities[idx] ? opportunities[idx].json : {};\n\n  // Skip if Apollo errored (406, 401, etc.) â€” company stays unprocessed for retry\n  if (apolloResp.error || (apolloResp.status && apolloResp.status >= 400)) {\n    continue;\n  }\n\n  const contacts = apolloResp.contacts || [];\n\n  if (contacts.length === 0) {\n    // Apollo authenticated but found nothing â€” write needs_review placeholder\n    results.push({ json: {\n      ...opportunity,\n      contact_name: '',\n      contact_title: '',\n      contact_email: '',\n      linkedin_url: '',\n      source_of_contact: 'apollo.io (no results)',\n      confidence_score: 0,\n      contact_status: 'needs_review',\n      contact_reasoning: 'Hunter.io and Apollo.io both returned no contacts for this domain'\n    }});\n    continue;\n  }\n\n  const withEmail = contacts.filter(c => c.email && c.email.includes('@'));\n  const best = withEmail.length > 0 ? withEmail[0] : contacts[0];\n  const hasEmail = !!(best.email && best.email.includes('@'));\n\n  results.push({ json: {\n    ...opportunity,\n    contact_name: ((best.first_name || '') + ' ' + (best.last_name || '')).trim(),\n    contact_title: best.title || '',\n    contact_email: hasEmail ? best.email : '',\n    linkedin_url: best.linkedin_url || '',\n    source_of_contact: 'apollo.io',\n    confidence_score: hasEmail ? 60 : 10,\n    contact_status: hasEmail ? 'contact_found' : 'needs_review',\n    contact_reasoning: hasEmail\n      ? 'Apollo.io fallback: found contact with email'\n      : 'Apollo.io fallback: found contact but no email available'\n  }});\n}\n\nreturn results;\n"
+      }
+    },
+    {
+      "id": "wf2-prep-apollo",
+      "name": "Prepare Apollo Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        760
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().map(item => ({\n  json: {\n    ...item.json,\n    _apollo_body: JSON.stringify({\n      organization_domains: [item.json.company_domain].filter(Boolean),\n      person_titles: ['director','vp','vice president','head','manager','chief','cto','coo','ceo','founder','president','owner'],\n      per_page: 5\n    })\n  }\n}));\n"
+      }
+    },
+    {
+      "id": "wf2-read-sent-log",
+      "name": "Read Sent Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        620,
+        40
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sent Log",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "wf2-read-suppression-list",
+      "name": "Read Suppression List",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        840,
+        40
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Suppression List",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "wf2-dedup-sent-history",
+      "name": "Dedup Against Sent History",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2150,
+        560
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Dedup: skip contacts already emailed (Sent Log) or suppressed (Suppression List).\n// Tags each item _dedup_status = 'kept' | 'skipped'; 'Route Dedup Result' (IF) splits on it.\nconst norm = e => String(e || '').trim().toLowerCase();\nconst sentEmails = new Set($('Read Sent Log').all().map(i => norm(i.json.contact_email)).filter(Boolean));\nconst suppEmails = new Set($('Read Suppression List').all().map(i => norm(i.json.contact_email)).filter(Boolean));\n\nlet dedup_skipped = 0;\nconst out = $input.all().map(item => {\n  const j = { ...item.json };\n  const email = norm(j.contact_email);\n  const inSent = !!email && sentEmails.has(email);\n  const inSupp = !!email && suppEmails.has(email);\n  if (inSent || inSupp) {\n    dedup_skipped++;\n    j._dedup_status = 'skipped';\n    j.matched_in = inSent && inSupp ? 'sent_log+suppression_list' : (inSent ? 'sent_log' : 'suppression_list');\n  } else {\n    j._dedup_status = 'kept';\n  }\n  return { json: j };\n});\nconsole.log('[Dedup Against Sent History] dedup_skipped=' + dedup_skipped + ' kept=' + (out.length - dedup_skipped));\nreturn out;"
+      }
+    },
+    {
+      "id": "wf2-route-dedup-result",
+      "name": "Route Dedup Result",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2360,
+        560
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "dedup-status-kept",
+              "leftValue": "={{ $json._dedup_status }}",
+              "rightValue": "kept",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "wf2-log-skipped-contacts",
+      "name": "Log Skipped Contacts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        2580,
+        680
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp ": "={{ $now.toISO() }}",
+            "contact_email": "={{ $json.contact_email }}",
+            "company_name": "={{ $json.company_name }}",
+            "opportunity_id": "={{ $json.opportunity_id }}",
+            "matched_in": "={{ $json.matched_in }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp ",
+              "displayName": "timestamp ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "contact_email",
+              "displayName": "contact_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company_name",
+              "displayName": "company_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "opportunity_id",
+              "displayName": "opportunity_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "matched_in",
+              "displayName": "matched_in",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Preserve Opportunity Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Preserve Opportunity Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Approved Opportunities",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Unchecked Opportunities",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Contacts for Manual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preserve Opportunity Data": {
+      "main": [
+        [
+          {
+            "node": "Clearbit Company Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clearbit Company Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Merge Company Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Company Data": {
+      "main": [
+        [
+          {
+            "node": "Extract Hiring Signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Hiring Signals": {
+      "main": [
+        [
+          {
+            "node": "Read All Contacts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Compute Hunter Offset",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Sent Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hunter.io Domain Search": {
+      "main": [
+        [
+          {
+            "node": "Score & Rank Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score & Rank Contacts": {
+      "main": [
+        [
+          {
+            "node": "Apollo Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confidence Gate": {
+      "main": [
+        [
+          {
+            "node": "Set Contact Found",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set Needs Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Contact Found": {
+      "main": [
+        [
+          {
+            "node": "Merge Contact Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Needs Review": {
+      "main": [
+        [
+          {
+            "node": "Merge Contact Paths",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Write to Contacts Sheet": {
+      "main": [
+        [
+          {
+            "node": "Filter Valid Opportunity ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Valid Opportunity ID": {
+      "main": [
+        [
+          {
+            "node": "Update Opportunity Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Opportunity Status": {
+      "main": [
+        [
+          {
+            "node": "Prepare WF3 Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare WF3 Payload": {
+      "main": [
+        [
+          {
+            "node": "Trigger Outreach Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Handler": {
+      "main": [
+        [
+          {
+            "node": "Write Error to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Approved Opportunities",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Unchecked Opportunities",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read Contacts for Manual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Approved Opportunities": {
+      "main": [
+        [
+          {
+            "node": "Preserve Opportunity Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Unchecked Opportunities": {
+      "main": [
+        [
+          {
+            "node": "Filter Older Than 2 Days",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filter Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Older Than 2 Days": {
+      "main": [
+        [
+          {
+            "node": "Prep Archive Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Archive Row": {
+      "main": [
+        [
+          {
+            "node": "Archive Unchecked Opportunities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archive Unchecked Opportunities": {
+      "main": [
+        [
+          {
+            "node": "Mark Archived in Opportunities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Rejected": {
+      "main": [
+        [
+          {
+            "node": "Prep Reject Archive Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Reject Archive Row": {
+      "main": [
+        [
+          {
+            "node": "Archive Rejected Opportunities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archive Rejected Opportunities": {
+      "main": [
+        [
+          {
+            "node": "Mark Rejected in Opportunities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Rejected in Opportunities": {
+      "main": [
+        [
+          {
+            "node": "Sort Descending by Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sort Descending by Row": {
+      "main": [
+        [
+          {
+            "node": "Delete Rejected Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Hunter Offset": {
+      "main": [
+        [
+          {
+            "node": "Hunter.io Domain Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Contacts for Manual": {
+      "main": [
+        [
+          {
+            "node": "Read Outreach Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Outreach Queue": {
+      "main": [
+        [
+          {
+            "node": "Find Unprocessed Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Unprocessed Contacts": {
+      "main": [
+        [
+          {
+            "node": "Trigger WF3 Manual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apollo Gate": {
+      "main": [
+        [
+          {
+            "node": "Prepare Apollo Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Confidence Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apollo Contacts Search": {
+      "main": [
+        [
+          {
+            "node": "Parse Apollo Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Apollo Request": {
+      "main": [
+        [
+          {
+            "node": "Apollo Contacts Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Sent Log": {
+      "main": [
+        [
+          {
+            "node": "Read Suppression List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Contact Paths": {
+      "main": [
+        [
+          {
+            "node": "Dedup Against Sent History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Apollo Results": {
+      "main": [
+        [
+          {
+            "node": "Dedup Against Sent History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dedup Against Sent History": {
+      "main": [
+        [
+          {
+            "node": "Route Dedup Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Dedup Result": {
+      "main": [
+        [
+          {
+            "node": "Write to Contacts Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Skipped Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "binaryMode": "separate"
+  }
+}
