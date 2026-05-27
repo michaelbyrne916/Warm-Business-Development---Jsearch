@@ -20,3 +20,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Audit snapshots (live workflow JSONs with credential refs / sheet IDs)
+.audit-snapshot/
