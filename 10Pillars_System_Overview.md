@@ -57,17 +57,15 @@ On 2026-05-17, before 8am: flip `DRY_RUN` = `"false"` in n8n Variables. WF4 will
 
 **Status: LAUNCH-READY — Activation Sunday 2026-05-17**
 
-Automated cold email campaign system using Instantly.ai. Receives warm-unresponsive contacts from WF6 on Sunday mornings, groups them by industry, generates AI email templates via the Claude API, uploads campaigns and contacts to Instantly.ai, and sends a preview approval email to Mike before any live campaign is created. Event handlers (BD1/BD6/BD7) manage account activation, replies, and unsubscribes in real time.
+Automated cold email campaign system using Instantly.ai. Receives warm-unresponsive contacts from WF6 on Sunday mornings, groups them by industry, generates AI email templates via the Claude API, uploads campaigns and contacts to Instantly.ai, and sends a preview approval email to Mike before any live campaign is created.
+
+> **Doc correction (2026-05-28):** Prior versions of this section listed BD1/BD4/BD6/BD7 as Cold BD / Instantly event handlers. That was incorrect — those were ABM workflows (Strategic ABM project) that read and wrote only the ABM Airtable base (`appudhrwBPBZsPq5x`). They never touched Instantly. The ABM project was closed out 2026-05-28 and BD1–BD7 archived in n8n.
 
 ### Workflow Index
 
 | Workflow | ID | Trigger | Status | Purpose |
 |----------|----|---------|--------|---------|
 | WF7: Cold Campaign Sunday Batch | `Bk4CkgOMr6t6XTG6` | Schedule — Sunday 6am | **INACTIVE** (activate 5/17) | Generates cold email templates via Claude API, uploads to Instantly |
-| BD1: Account Activation | `mBwEPWcdbx7b3dUA` | Schedule — hourly | ACTIVE | Handles Instantly.ai account activation events |
-| BD4: Pool Management | `RDjbWgriKOm1tmgX` | Schedule — occasional | ACTIVE | Manages cold BD lead pool |
-| BD6: Reply and Pause | `QGx4yebi4Exr2E4e` | Schedule — hourly | ACTIVE | Detects Instantly.ai replies, pauses sequences |
-| BD7: Unsubscribe and DNC | `A0QxPVYHNkIBIrHU` | Schedule — hourly | ACTIVE | Handles unsubscribes, adds to DNC (Airtable) |
 
 ### Pre-Launch Checklist
 
@@ -85,7 +83,7 @@ Automated cold email campaign system using Instantly.ai. Receives warm-unrespons
 4. Review preview email → click approve link → Instantly campaigns created + contacts uploaded
 5. Week 1 volume: dailyLimit=30/inbox × 3 inboxes = 90/day; weeklyCap=75/industry group
 
-**Known open item (v2 backlog):** BD7 unsubscribes write to Airtable only. No automated sync to warm pipeline suppression list in Google Sheets. Manual cross-check required at current volume; BD7→Sheets sync targeted 2–3 weeks post-launch.
+**Known open item (v2 backlog):** Cold BD unsubscribes are tracked inside Instantly.ai. The ABM BD7 workflow (closed out 2026-05-28) wrote DNC entries to the ABM Airtable base only — it was never synced to the warm pipeline suppression list in Google Sheets, and is no longer running. If a cross-system DNC list is needed in v2, build a fresh Instantly→Sheets sync rather than relying on BD7.
 
 **Audit and decision record:** See [LAUNCH_PREP_2026-05-13.md](LAUNCH_PREP_2026-05-13.md)
 
@@ -111,7 +109,7 @@ PillarSignal was a planned signal intelligence platform intended to aggregate bu
 
 **Why archived:** The warm outreach pipeline (Project 1) and cold campaign system (Project 2) together cover the core BD motion at current scale. PillarSignal would have required significant data infrastructure investment (Airtable → Supabase migration, custom signal ingestion pipelines) without a clear near-term ROI relative to the launch priorities. The project is archived pending future strategic direction — it may be revisited if the BD pipeline matures and a higher-intent signal layer becomes the next bottleneck.
 
-**What is NOT happening:** The previously planned Airtable → Supabase migration has been removed from the roadmap. Airtable remains the store for BD7 DNC/unsubscribe data at current scale.
+**What is NOT happening:** The previously planned Airtable → Supabase migration has been removed from the roadmap. The ABM Airtable base (which held BD7 DNC data) is now read-only following the 2026-05-28 ABM closeout.
 
 **Revenue pipeline status:** PillarSignal is not feeding the revenue pipeline and has no active data flows. It is not referenced in any live workflow.
 
@@ -150,11 +148,11 @@ PillarSignal            WF1: Lead Discovery              WF7: Cold Campaign Batc
                               └─── WF6: Warm to Cold ─────────┘
                                    Handoff (Sunday 5am)
 
-[ABM Layer]             [Event Handlers]
-Strategic ABM           BD1: Account Activation
-(Targeting Sheet)       BD6: Reply and Pause
-                        BD7: Unsubscribe + DNC
-                        (all Instantly.ai events)
+[ABM Layer]
+Strategic ABM
+(Targeting Sheet)
+(Account-based BD system BD1–BD7 closed out 2026-05-28 —
+ was never live; never wired to Instantly.)
 
 [Future / Queued]
 SLED Signal Intelligence Tool (design complete)
@@ -177,7 +175,7 @@ PillarSignal is **not** part of the live revenue pipeline. It is archived and ha
 | LLM — outreach drafts | GPT-4o-mini (OpenAI) | WF3 email generation |
 | LLM — cold templates | claude-sonnet-4-5 (Anthropic) | WF7 template generation |
 | Data store | Google Sheets | All pipeline data (Opportunities, Contacts, OQ, etc.) |
-| DNC store | Airtable | Instantly.ai unsubscribes (BD7) |
+| DNC store | Airtable (ABM base, retained read-only post-closeout) | DNC list from the now-closed ABM project (BD7); never wired to Instantly. Cold BD unsubscribes are handled inside Instantly itself. |
 
 ---
 
