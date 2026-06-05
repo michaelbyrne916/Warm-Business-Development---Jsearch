@@ -1,0 +1,1809 @@
+{
+  "updatedAt": "2026-06-03T18:13:46.571Z",
+  "createdAt": "2026-03-27T00:41:19.227Z",
+  "id": "T1jTXreAw0uZ2TOD",
+  "name": "WF3: Outreach Draft Generation",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "wf3-trigger-exec",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        304
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "wf3-trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * WF3 — Build Outreach Prompt (8-email sequence)\n * Assembles the LLM system + user prompt for an 8-email warm outreach sequence.\n *  - Emails 1-3: intro / value reframe / reflective question.\n *  - Emails 4-8: candidate sizzle / market insight / soft check-in / sizzle callback / breakup.\n * Candidate sizzle for emails 4 & 7 is routed by job_title/industry/skills/JD keywords.\n * Input:  Merged opportunity + contact data from WF2\n * Output: Same item with _system_prompt, _user_prompt, _candidate_track added\n */\nconst results = [];\n\n// --- Candidate sizzle library (verbatim facts; LLM weaves them as prose, de-dashed) ---\nconst SIZZLE = {\n  IT: `IT / STEM candidate. Profile: Technical Program Manager / Scrum Master.\nCurrently engaged on an active state government IT initiative. Brings 12+ years of technical program management across healthcare, financial services, and enterprise retail. PMP, Six Sigma Black Belt, SAFe, and Scrum certified. Has owned programs ranging from $1.5M to $10.7M, led cross functional teams of 40+, and has deep hands on experience with Salesforce, Oracle Fusion, Agile and Waterfall hybrid delivery, QA coordination, and executive steering committee reporting. Sacramento area based and already operating in the California state agency environment.`,\n  Finance: `Finance / Accounting candidate. Profile: CFO / VP Finance / Head of FP&A.\nA strategic finance executive with 15+ years across consumer finance and asset management, known for building finance functions from the ground up and driving measurable cost reduction at scale. Has delivered $4M+ in recurring savings, designed and executed a workforce strategy generating $20M in projected annual savings, and rebuilt a full analytics organization from scratch. Deep experience in FP&A, M&A integration, board level reporting, incentive design, and capital strategy. Previously held senior roles at a Fortune 100 financial institution and a $1B+ AUM asset manager.`,\n  Construction: `Construction Management candidate. Profile: Construction Manager / Owner's Representative.\nA seasoned construction professional with experience managing ground up and renovation projects across commercial, public sector, and infrastructure verticals. Has served in both owner's representative and GC side roles, with concurrent oversight of multiple active projects ranging from $10M to $30M+. Brings hands on command of the full project lifecycle, from preconstruction and design coordination through procurement, scheduling, field execution, and closeout. Proven track record managing subcontractor relationships, RFI and submittal workflows, and budget controls while keeping stakeholders informed and projects on schedule. Comfortable operating in highly regulated environments and experienced working alongside public agency clients, architects, and multi discipline engineering teams.`\n};\n\n// Route to a candidate track from role/company keywords. Construction is checked first\n// because \"project manager\"/\"engineer\" otherwise get swept into IT. Default = IT (largest segment).\nfunction pickTrack(hay) {\n  const constructionCtx = /\\b(construction|contractor|building|civil|jobsite|job site|preconstruction|subcontractor|general contractor)\\b/.test(hay);\n  if (/\\b(superintendent|estimator)\\b/.test(hay) || /\\bconstruction\\b/.test(hay) || (/\\bproject manager\\b/.test(hay) && constructionCtx)) {\n    return 'Construction';\n  }\n  if (/\\b(finance|accounting|controller|fp&a|fp and a|cfo|treasury|treasurer|bookkeeper|accountant|auditor)\\b/.test(hay)) {\n    return 'Finance';\n  }\n  if (/\\b(it|software|developer|engineer|cloud|data|security|infrastructure|pm|scrum|devops|architect|systems|network|qa|technical|cyber|sre|sysadmin)\\b/.test(hay)) {\n    return 'IT';\n  }\n  return 'IT';\n}\n\nconst systemPrompt = `You are writing an 8-email outbound business development sequence for a staffing and recruiting firm. The emails go to a likely hiring manager or functional leader after a new job posting at their company is identified.\n\n--- OUR FIRM ---\n10 Pillars Solutions is an AI-enabled, human-led staffing firm that helps employers hire faster without sacrificing quality. We pair intelligent sourcing with experienced recruiter judgment, technical screening, and rigorous QA, so clients get qualified candidates, not just more resumes. We work contract, contract-to-hire, and direct-hire across IT and STEM, finance and accounting, and construction management.\n\n--- METHOD: NEPQ ---\nWrite using NEPQ principles:\n- Build problem awareness before offering any solution.\n- Lead with curiosity and questions that pull the reader into reflecting on their own hiring situation.\n- Never use pitch language, hype, or pressure.\n- Sound like a sharp human who knows this space, not a vendor working a list.\n- Let the reader feel understood before they feel sold to. In most emails you are not selling at all.\n\n--- VOICE RULES (every email) ---\n- Conversational and direct. Write like a real person typing a quick note.\n- No corporate speak, no jargon, no buzzwords.\n- Do not use dashes of any kind. No hyphens as connectors, no em dashes, no en dashes. Use commas or short sentences instead. This applies even when restating the candidate facts below.\n- No bullet points or lists in the email bodies.\n- No exclamation marks.\n- Short paragraphs, easy to skim and reply to. About a 9th grade reading level.\n- Every email body opens with this exact line: Hi FIRST_NAME,  (use the real first name given below). Then a blank line, then the body.\n- Do NOT include a signature, a sign-off name, or a contact block. The sending system adds the signature. End on your last real sentence.\n- Vary sentence openings across the eight emails. Do not start two emails the same way.\n\n--- SUBJECT LINES ---\n- 3 to 6 words. Curiosity-driven and human. No spam words, no all caps, no clickbait.\n- Emails 2 through 8 may use a short Re: style subject so the thread reads as continuing.\n\n--- DO NOT ---\n- Do not invent facts about the company, role, person, or candidate.\n- Do not mention scraping, automation, AI, monitoring, or that the role was detected automatically.\n- Do not use cliches: hope you are doing well, touching base, quick chat, pick your brain, top talent, best in class, world class, game changer, perfect fit.\n- Do not reuse the same wording or call to action across emails.\n\n--- BANNED PHRASES (must NEVER appear in any of the 8 emails, in any form) ---\n\"I came across\", \"I wanted to follow up\", \"I wanted to circle back\", \"circling back\", \"following up\", \"just checking in\", \"wanted to reach out\".\nIf you are tempted to write any of these, rewrite the sentence from scratch with a concrete, specific observation instead.\n\n--- THE 8-EMAIL ARC ---\nEach email must feel like a natural continuation, never a copy-paste reminder.\n\nEmail 1 - Noticed their specific opening. A personalized intro that shows you are paying attention to their company and this role. Reference the posted role naturally and one grounded detail about what the company does. Warm, brief, human. No pitch. A low-pressure opening to a conversation.\n\nEmail 2 - Follow up from a different angle. Add value or reframe why this hire matters now, such as timing, delivery pressure, team load, or how hard this role is to fill well. Do not restate Email 1. Stay short.\n\nEmail 3 - A reflective question. Pull engagement instead of pitching. Ask something real, like what has been the hardest part of filling this role, or where the pressure is coming from. One genuine question. Do not offer a solution yet.\n\nEmail 4 - Candidate sizzle. Reference their open role, then introduce the anonymized candidate described in CANDIDATE SIZZLE below, who recently came off a project and could be a fit. Phrase it naturally, for example: if the role is still open, we have someone who might be worth a quick conversation, then describe the person in a few human sentences. Do not paste a resume and do not use bullets. Make it read like you are telling them about a strong person you know.\n\nEmail 5 - Industry insight. Share one genuinely useful, grounded observation about hiring or talent trends in their space. Pure credibility builder. No candidate, no pitch, no ask beyond an open door.\n\nEmail 6 - Soft check-in. Brief and conversational. Make it easy to say not right now. For example: if the timing is not right, no problem, happy to be a resource when the need comes up.\n\nEmail 7 - Candidate sizzle callback. Refer back to the SAME candidate from Email 4. Add gentle, honest urgency: the person you mentioned a few weeks ago is still available but actively interviewing, and ask if it is worth a quick conversation before they are off the market. Low pressure, not pushy.\n\nEmail 8 - Breakup that leaves the door open. The last note on this. Clean and gracious, no guilt. For example: this is the last note from me on this one, and when staffing needs come up down the road, you know where to find me.\n\n--- CANDIDATE SIZZLE (Emails 4 and 7 only, same person in both) ---\nUse ONLY the candidate provided in the user message. Weave the details in as natural prose, never as a list, and never add facts that are not given.\n- Refer to the candidate as they/them. Never assign a gender (no he, she, his, her).\n- Preserve the candidate's specific numbers and metrics verbatim: dollar amounts, team sizes, years of experience, and named certifications or tools. Do not soften them into vague phrases like \"significant budgets\" or \"large teams.\" The concrete numbers are the point.\n\n--- OUTPUT FORMAT ---\nRespond ONLY with this exact JSON object, no markdown and no extra text:\n{\n  \"email_1_subject\": \"...\",\n  \"email_1_body\": \"...\",\n  \"email_2_subject\": \"...\",\n  \"email_2_body\": \"...\",\n  \"email_3_subject\": \"...\",\n  \"email_3_body\": \"...\",\n  \"email_4_subject\": \"...\",\n  \"email_4_body\": \"...\",\n  \"email_5_subject\": \"...\",\n  \"email_5_body\": \"...\",\n  \"email_6_subject\": \"...\",\n  \"email_6_body\": \"...\",\n  \"email_7_subject\": \"...\",\n  \"email_7_body\": \"...\",\n  \"email_8_subject\": \"...\",\n  \"email_8_body\": \"...\",\n  \"personalization_angle\": \"...\",\n  \"recipient_reasoning\": \"...\",\n  \"scaling_hypothesis\": \"...\",\n  \"candidate_track\": \"IT | Finance | Construction\"\n}\n\nField notes:\n- Each email body must contain the full email text starting with the Hi FIRST_NAME, line, with blank lines between paragraphs and no signature.\n- personalization_angle: one sentence on the primary company customization used.\n- recipient_reasoning: one sentence on why this person was selected as the likely contact.\n- scaling_hypothesis: one sentence on why this role likely matters now.\n- candidate_track: echo back which sizzle track you were given (IT, Finance, or Construction).`;\n\nfor (const item of $input.all()) {\n  const d = item.json;\n\n  const contactName = d.contact_name || '';\n  const firstName = contactName.split(' ')[0] || '';\n  const hasName = firstName.length > 0;\n  const greetingInstruction = hasName\n    ? 'Open every email with this exact line: Hi ' + firstName + ',  then a blank line, then the body. Use the real name, not a placeholder or a merge tag.'\n    : 'The recipient first name is not known. Open every email with the bare line: Hi,  on its own line, then a blank line, then the body. Do not use Hiring Manager, there, or any placeholder name.';\n\n  // Seniority tier for tone guidance\n  const title = (d.contact_title || '').toLowerCase();\n  let seniorityTier;\n  if (/\\b(vp|vice president|director|chief|cto|coo|ceo|cfo|head of|svp|evp)\\b/.test(title)) {\n    seniorityTier = 'senior — use more concise, outcome-focused, commercial language';\n  } else if (/\\b(manager|lead|senior|sr\\.?|principal)\\b/.test(title)) {\n    seniorityTier = 'mid-level — use slightly more collaborative, role-specific language';\n  } else {\n    seniorityTier = 'unknown — write for a likely functional leader; keep the fallback ask polite';\n  }\n\n  // Candidate sizzle routing for emails 4 and 7\n  const routeHay = ((d.job_title || '') + ' ' + (d.company_industry || '') + ' ' + (d.skills || '') + ' ' + (d.job_description || '')).toLowerCase();\n  const candidateTrack = pickTrack(routeHay);\n  const selectedSizzle = SIZZLE[candidateTrack];\n\n  const userPrompt = `Generate an 8-email warm outreach sequence for this opportunity:\n\n--- COMPANY ---\nName: ${d.company_name || 'Unknown'}\nDomain: ${d.company_domain || 'Unknown'}\nIndustry: ${d.company_industry || 'Not specified'}\nHQ: ${d.company_hq || 'Not specified'}\nDescription: ${d.company_summary || 'Not available'}\nHiring Signals: ${d.hiring_signals || 'None identified'}\nTech Stack in JD: ${d.tech_stack || 'Not specified'}\n\n--- ROLE ---\nJob Title: ${d.job_title || 'Unknown'}\nLocation: ${d.location || 'Unknown'}\nSeniority: ${d.seniority || 'Not specified'}\nEmployment Type: ${d.employment_type || 'Not specified'}\nSkills Mentioned: ${d.skills || 'Not specified'}\nJob Description (excerpt):\n${(d.job_description || '').substring(0, 1000)}\n\n--- CONTACT ---\nName: ${contactName || 'Not available'}\nFirst Name: ${firstName || 'Not available'}\nTitle: ${d.contact_title || 'Unknown'}\nSeniority Tier: ${seniorityTier}\nWhy They Were Selected: ${d.contact_reasoning || 'Best available contact for this role'}\n\n--- CANDIDATE SIZZLE (use in Emails 4 and 7, same person in both) ---\nTrack: ${candidateTrack}\n${selectedSizzle}\n\n${greetingInstruction}`;\n\n  results.push({\n    json: {\n      ...d,\n      _system_prompt: systemPrompt,\n      _user_prompt: userPrompt,\n      _contact_first_name: firstName,\n      _candidate_track: candidateTrack\n    }\n  });\n}\n\nreturn results;\n"
+      },
+      "id": "wf3-build-prompt",
+      "name": "Build Outreach Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $vars.LLM_PROVIDER }}",
+                    "rightValue": "anthropic",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Claude"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $vars.LLM_PROVIDER }}",
+                    "rightValue": "openai",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "OpenAI"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf3-llm-router",
+      "name": "LLM Provider Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        672,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $vars.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"{{ $vars.ANTHROPIC_MODEL || 'claude-opus-4-6' }}\",\n  \"max_tokens\": 6000,\n  \"system\": {{ JSON.stringify($json._system_prompt) }},\n  \"messages\": [\n    {\"role\": \"user\", \"content\": {{ JSON.stringify($json._user_prompt) }}}\n  ]\n}",
+        "options": {}
+      },
+      "id": "wf3-claude-call",
+      "name": "Claude API Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        880,
+        272
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.OPENAI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o-mini\",\n  \"max_tokens\": 6000,\n  \"response_format\": {\"type\": \"json_object\"},\n  \"messages\": [\n    {\"role\": \"system\", \"content\": {{ JSON.stringify($json._system_prompt) }}},\n    {\"role\": \"user\", \"content\": {{ JSON.stringify($json._user_prompt) }}}\n  ]\n}",
+        "options": {}
+      },
+      "id": "wf3-openai-call",
+      "name": "OpenAI GPT-4o Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        880,
+        512
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {},
+      "id": "wf3-merge-llm",
+      "name": "Merge LLM Output",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1104,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * WF3 — Parse LLM Response (8-email)\n * Tags items with _parse_status='success' | 'fail' for downstream routing.\n * On parse failure: emits minimal diagnostic fields only, no placeholder OQ row.\n * Route Parse Result IF sends success -> Write to OQ, fail -> Log Parse Failure.\n */\nconst results = [];\nconst originalItems = $('Build Outreach Prompt').all();\n\nfor (let i = 0; i < $input.all().length; i++) {\n  const item = $input.all()[i];\n  const d = item.json;\n  const orig = originalItems[i] ? originalItems[i].json : {};\n  let parsed = null;\n  let parseError = null;\n  let rawForLog = '';\n\n  try {\n    if (d.choices && d.choices[0]) {\n      const raw = d.choices[0].message?.content || '{}';\n      rawForLog = raw;\n      const cleaned = raw.replace(/```json?\\s*/g, '').replace(/```\\s*/g, '').trim();\n      parsed = JSON.parse(cleaned);\n    } else if (d.content && d.content[0]) {\n      const raw = d.content[0].text || '{}';\n      rawForLog = raw;\n      const cleaned = raw.replace(/```json?\\s*/g, '').replace(/```\\s*/g, '').trim();\n      parsed = JSON.parse(cleaned);\n    } else if (d.email_1_subject) {\n      parsed = d;\n    } else if (d.error) {\n      throw new Error('LLM API error: ' + (d.error.message || JSON.stringify(d.error)));\n    } else {\n      throw new Error('Unrecognized LLM response shape');\n    }\n  } catch(e) {\n    parseError = e.message;\n  }\n\n  if (parseError) {\n    results.push({ json: {\n      _parse_status: 'fail',\n      opportunity_id: orig.opportunity_id || '',\n      company_name: orig.company_name || '',\n      contact_email: orig.contact_email || '',\n      contact_name: orig.contact_name || '',\n      job_title: orig.job_title || '',\n      parse_error: parseError,\n      raw_excerpt: rawForLog.substring(0, 500),\n      llm_provider: $vars.LLM_PROVIDER || 'openai'\n    }});\n    continue;\n  }\n\n  const contactFirst = (orig.contact_name || '').split(' ')[0] || '';\n  const companyName = orig.company_name || '';\n  const clean = (str) => (str || '')\n    .replace(/\\b(Hi|Hello|Dear)[,\\s]*Hiring(?:\\s+Manager)?\\b/gi, (_, g) => contactFirst ? g + ' ' + contactFirst : g + ',')\n    .replace(/\\[Hiring Manager\\]/gi, contactFirst)\n    .replace(/\\[First Name\\]/gi, contactFirst)\n    .replace(/\\[Name\\]/gi, contactFirst)\n    .replace(/\\[Your Name\\]/gi, 'Michael')\n    .replace(/\\[Company Name\\]/gi, companyName)\n    .replace(/\\[Company\\]/gi, companyName)\n    .replace(/\\s*—\\s*/g, ', ')\n    .replace(/\\s*--\\s*/g, ', ')\n    .replace(/\\s*–\\s*/g, ', ')\n    .replace(/([A-Za-z])-([A-Za-z])/g, '$1 $2')   // strip intra-word hyphens (cross-functional -> cross functional)\n    .replace(/([A-Za-z])-([A-Za-z])/g, '$1 $2')   // second pass for chained hyphens (state-of-the-art)\n    .replace(/(\\d)-([A-Za-z])/g, '$1 $2')         // digit-letter (12-plus -> 12 plus)\n    .replace(/([A-Za-z])-(\\d)/g, '$1 $2')         // letter-digit (leaves date/range digit-digit like 2026-06-01 intact)\n    // Deterministic banned-phrase scrub — safety net for when the LLM ignores the prompt ban.\n    .replace(/I wanted to circle back to/gi, 'About')\n    .replace(/I wanted to circle back/gi, 'A quick note')\n    .replace(/circling back to/gi, 'returning to')\n    .replace(/circling back/gi, 'returning')\n    .replace(/I came across/gi, 'I noticed')\n    .replace(/I wanted to follow up/gi, 'One more thought')\n    .replace(/following up/gi, 'writing again')\n    .replace(/just checking in/gi, 'a quick note')\n    .replace(/wanted to reach out/gi, 'wanted to write')\n    // Broader cliche scrub (hyphens already stripped to spaces above, so match spaced forms)\n    .replace(/touching base/gi, 'a quick note')\n    .replace(/quick chat/gi, 'quick conversation')\n    .replace(/pick your brain/gi, 'get your perspective')\n    .replace(/top talent/gi, 'strong candidates')\n    .replace(/best in class/gi, 'strong')\n    .replace(/world class/gi, 'excellent')\n    .replace(/game changer/gi, 'meaningful step')\n    .replace(/perfect fit/gi, 'strong fit')\n    .replace(/hope (?:you are|you're|youre) doing well/gi, 'I hope things are going well')\n    .replace(/[ \\t]+\\n/g, '\\n')     // strip trailing spaces on each line\n    .replace(/\\n{3,}/g, '\\n\\n')     // collapse 3+ blank lines to a single paragraph break\n    .trim()                          // remove leading/trailing whitespace and blank lines\n    .replace(/^([a-z])/, c => c.toUpperCase());  // re-capitalize first char after any scrub rewrite\n\n  results.push({\n    json: {\n      _parse_status: 'success',\n      opportunity_id: orig.opportunity_id || '',\n      company_name: orig.company_name || '',\n      company_domain: orig.company_domain || '',\n      contact_name: orig.contact_name || '',\n      contact_title: orig.contact_title || '',\n      contact_email: orig.contact_email || '',\n      job_title: orig.job_title || '',\n      location: orig.location || '',\n      company_summary: orig.company_summary || '',\n      company_industry: orig.company_industry || '',\n      seniority: orig.seniority || '',\n      skills: orig.skills || '',\n      confidence_score: orig.confidence_score || '',\n      contact_reasoning: orig.contact_reasoning || '',\n      linkedin_url: orig.linkedin_url || '',\n      source_url: orig.source_url || '',\n      posted_date: orig.posted_date || '',\n      email_1_subject: clean(parsed.email_1_subject) || '',\n      email_1_body: clean(parsed.email_1_body) || '',\n      email_2_subject: clean(parsed.email_2_subject) || '',\n      email_2_body: clean(parsed.email_2_body) || '',\n      email_3_subject: clean(parsed.email_3_subject) || '',\n      email_3_body: clean(parsed.email_3_body) || '',\n      email_4_subject: clean(parsed.email_4_subject) || '',\n      email_4_body: clean(parsed.email_4_body) || '',\n      email_5_subject: clean(parsed.email_5_subject) || '',\n      email_5_body: clean(parsed.email_5_body) || '',\n      email_6_subject: clean(parsed.email_6_subject) || '',\n      email_6_body: clean(parsed.email_6_body) || '',\n      email_7_subject: clean(parsed.email_7_subject) || '',\n      email_7_body: clean(parsed.email_7_body) || '',\n      email_8_subject: clean(parsed.email_8_subject) || '',\n      email_8_body: clean(parsed.email_8_body) || '',\n      personalization_angle: parsed.personalization_angle || '',\n      recipient_reasoning: parsed.recipient_reasoning || '',\n      scaling_hypothesis: parsed.scaling_hypothesis || '',\n      candidate_track: parsed.candidate_track || orig._candidate_track || '',\n      approval_status: 'pending',\n      sent_status: 'unsent',\n      sent_timestamp: '',\n      llm_provider: $vars.LLM_PROVIDER || 'openai',\n      generated_at: new Date().toISOString()\n    }\n  });\n}\n\nreturn results;\n"
+      },
+      "id": "wf3-parse-response",
+      "name": "Parse LLM Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Outreach Queue",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "opportunity_id": "={{ $json.opportunity_id }}",
+            "contact_name": "={{ $json.contact_name }}",
+            "company_name": "={{ $json.company_name }}",
+            "contact_email": "={{ $json.contact_email }}",
+            "job_title": "={{ $json.job_title }}",
+            "email_1_subject": "={{ $json.email_1_subject }}",
+            "email_1_body": "={{ $json.email_1_body }}",
+            "email_2_subject": "={{ $json.email_2_subject }}",
+            "email_2_body": "={{ $json.email_2_body }}",
+            "email_3_subject": "={{ $json.email_3_subject }}",
+            "email_3_body": "={{ $json.email_3_body }}",
+            "posted_date": "={{ $json.posted_date }}",
+            "source_url": "={{ $json.source_url }}",
+            "approval_status": "pending",
+            "sent_status": "unsent",
+            "follow_up_stage": "0",
+            "scheduled_date": "",
+            "company_domain": "={{ $json.company_domain }}",
+            "personalization_angle": "={{ $json.personalization_angle }}",
+            "recipient_reasoning": "={{ $json.recipient_reasoning }}",
+            "scaling_hypothesis": "={{ $json.scaling_hypothesis }}",
+            "email_4_subject": "={{ $json.email_4_subject }}",
+            "email_4_body": "={{ $json.email_4_body }}",
+            "email_5_subject": "={{ $json.email_5_subject }}",
+            "email_5_body": "={{ $json.email_5_body }}",
+            "email_6_subject": "={{ $json.email_6_subject }}",
+            "email_6_body": "={{ $json.email_6_body }}",
+            "email_7_subject": "={{ $json.email_7_subject }}",
+            "email_7_body": "={{ $json.email_7_body }}",
+            "email_8_subject": "={{ $json.email_8_subject }}",
+            "email_8_body": "={{ $json.email_8_body }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "opportunity_id",
+              "displayName": "opportunity_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "contact_name",
+              "displayName": "contact_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company_name",
+              "displayName": "company_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company_domain",
+              "displayName": "company_domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "contact_email",
+              "displayName": "contact_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "job_title",
+              "displayName": "job_title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_1_subject",
+              "displayName": "email_1_subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_1_body",
+              "displayName": "email_1_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_2_subject",
+              "displayName": "email_2_subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_2_body",
+              "displayName": "email_2_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_3_subject",
+              "displayName": "email_3_subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_3_body",
+              "displayName": "email_3_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "approval_status",
+              "displayName": "approval_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sent_status",
+              "displayName": "sent_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sent_timestamp",
+              "displayName": "sent_timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "posted_date",
+              "displayName": "posted_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_url",
+              "displayName": "source_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "follow_up_stage",
+              "displayName": "follow_up_stage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "scheduled_date",
+              "displayName": "scheduled_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "personalization_angle",
+              "displayName": "personalization_angle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "recipient_reasoning",
+              "displayName": "recipient_reasoning",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "scaling_hypothesis",
+              "displayName": "scaling_hypothesis",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_4_subject",
+              "displayName": "email_4_subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_4_body",
+              "displayName": "email_4_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_5_subject",
+              "displayName": "email_5_subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_5_body",
+              "displayName": "email_5_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_6_subject",
+              "displayName": "email_6_subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_6_body",
+              "displayName": "email_6_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_7_subject",
+              "displayName": "email_7_subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_7_body",
+              "displayName": "email_7_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_8_subject",
+              "displayName": "email_8_subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_8_body",
+              "displayName": "email_8_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "wf3-write-outreach-queue",
+      "name": "Write to Outreach Queue",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1552,
+        384
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Opportunities",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "opportunity_id": "={{ $json.opportunity_id }}",
+            "status": "draft_ready"
+          },
+          "matchingColumns": [
+            "opportunity_id"
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf3-update-opp-status",
+      "name": "Update Opportunity to draft_ready",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        384
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "wf3-error-handler",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "workflow_name": "WF3: Outreach Draft Generation",
+            "node_name": "={{ $json.execution.lastNodeExecuted }}",
+            "error_message": "={{ $json.execution.error.message }}",
+            "input_data": "={{ JSON.stringify($json.execution.error.context || {}) }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "wf3-write-error",
+      "name": "Write Error to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        224,
+        720
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## WF3: Outreach Draft Generation\n\nGenerates personalized outreach using LLM.\n\n**Flow:**\n1. Receive opportunity + contact from WF2 (or manual)\n2. Build structured LLM prompt\n3. Route to OpenAI GPT-4o or Claude (via LLM_PROVIDER env)\n4. Parse JSON response\n5. Write to Outreach Queue sheet\n6. Update Opportunities status to draft_ready\n7. Create Google Doc review packet\n\n**Toggle LLM:**\n- LLM_PROVIDER=openai → GPT-4o\n- LLM_PROVIDER=anthropic → Claude\n\n**Env vars needed:**\n- LLM_PROVIDER\n- OPENAI_API_KEY\n- ANTHROPIC_API_KEY\n- ANTHROPIC_MODEL\n- GOOGLE_SHEETS_ID\n- GOOGLE_DOCS_FOLDER_ID",
+        "height": 360,
+        "width": 280
+      },
+      "id": "wf3-sticky",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        208
+      ]
+    },
+    {
+      "id": "wf3-route-parse-result",
+      "name": "Route Parse Result",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        384
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "parse-status-success",
+              "leftValue": "={{ $json._parse_status }}",
+              "rightValue": "success",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "wf3-log-parse-failure",
+      "name": "Log Parse Failure",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1552,
+        540
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "workflow_name": "WF3: Outreach Draft Generation",
+            "node_name": "Parse LLM Response",
+            "error_message": "={{ $json.parse_error }}",
+            "input_data": "={{ JSON.stringify({opportunity_id: $json.opportunity_id, company_name: $json.company_name, contact_email: $json.contact_email, job_title: $json.job_title, llm_provider: $json.llm_provider, raw_excerpt: $json.raw_excerpt}) }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "7dIWwoowtD1RTjmu",
+          "name": "Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    }
+  ],
+  "connections": {
+    "Build Outreach Prompt": {
+      "main": [
+        [
+          {
+            "node": "LLM Provider Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Provider Router": {
+      "main": [
+        [
+          {
+            "node": "Claude API Call",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "OpenAI GPT-4o Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude API Call": {
+      "main": [
+        [
+          {
+            "node": "Merge LLM Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI GPT-4o Call": {
+      "main": [
+        [
+          {
+            "node": "Merge LLM Output",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge LLM Output": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write to Outreach Queue": {
+      "main": [
+        [
+          {
+            "node": "Update Opportunity to draft_ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Handler": {
+      "main": [
+        [
+          {
+            "node": "Write Error to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Outreach Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Outreach Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM Response": {
+      "main": [
+        [
+          {
+            "node": "Route Parse Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Parse Result": {
+      "main": [
+        [
+          {
+            "node": "Write to Outreach Queue",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Parse Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "5eb8662b-cc0e-4188-94d4-8379abf1c04f",
+  "activeVersionId": "5eb8662b-cc0e-4188-94d4-8379abf1c04f",
+  "versionCounter": 134,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-03-27T00:41:19.228Z",
+      "createdAt": "2026-03-27T00:41:19.228Z",
+      "role": "workflow:owner",
+      "workflowId": "T1jTXreAw0uZ2TOD",
+      "projectId": "vBgsLJa2v6uIUdQM",
+      "project": {
+        "updatedAt": "2026-03-26T23:07:09.721Z",
+        "createdAt": "2026-03-26T23:07:03.922Z",
+        "id": "vBgsLJa2v6uIUdQM",
+        "name": "Michael Byrne <michael@10pillarssolutions.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "df188ec2-208c-4f14-a4f7-25f762dc17a3"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-06-03T18:13:46.572Z",
+    "createdAt": "2026-06-03T18:13:46.572Z",
+    "versionId": "5eb8662b-cc0e-4188-94d4-8379abf1c04f",
+    "workflowId": "T1jTXreAw0uZ2TOD",
+    "nodes": [
+      {
+        "parameters": {
+          "inputSource": "passthrough"
+        },
+        "id": "wf3-trigger-exec",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          0,
+          304
+        ]
+      },
+      {
+        "parameters": {},
+        "id": "wf3-trigger-manual",
+        "name": "Manual Trigger",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          512
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "/**\n * WF3 — Build Outreach Prompt (8-email sequence)\n * Assembles the LLM system + user prompt for an 8-email warm outreach sequence.\n *  - Emails 1-3: intro / value reframe / reflective question.\n *  - Emails 4-8: candidate sizzle / market insight / soft check-in / sizzle callback / breakup.\n * Candidate sizzle for emails 4 & 7 is routed by job_title/industry/skills/JD keywords.\n * Input:  Merged opportunity + contact data from WF2\n * Output: Same item with _system_prompt, _user_prompt, _candidate_track added\n */\nconst results = [];\n\n// --- Candidate sizzle library (verbatim facts; LLM weaves them as prose, de-dashed) ---\nconst SIZZLE = {\n  IT: `IT / STEM candidate. Profile: Technical Program Manager / Scrum Master.\nCurrently engaged on an active state government IT initiative. Brings 12+ years of technical program management across healthcare, financial services, and enterprise retail. PMP, Six Sigma Black Belt, SAFe, and Scrum certified. Has owned programs ranging from $1.5M to $10.7M, led cross functional teams of 40+, and has deep hands on experience with Salesforce, Oracle Fusion, Agile and Waterfall hybrid delivery, QA coordination, and executive steering committee reporting. Sacramento area based and already operating in the California state agency environment.`,\n  Finance: `Finance / Accounting candidate. Profile: CFO / VP Finance / Head of FP&A.\nA strategic finance executive with 15+ years across consumer finance and asset management, known for building finance functions from the ground up and driving measurable cost reduction at scale. Has delivered $4M+ in recurring savings, designed and executed a workforce strategy generating $20M in projected annual savings, and rebuilt a full analytics organization from scratch. Deep experience in FP&A, M&A integration, board level reporting, incentive design, and capital strategy. Previously held senior roles at a Fortune 100 financial institution and a $1B+ AUM asset manager.`,\n  Construction: `Construction Management candidate. Profile: Construction Manager / Owner's Representative.\nA seasoned construction professional with experience managing ground up and renovation projects across commercial, public sector, and infrastructure verticals. Has served in both owner's representative and GC side roles, with concurrent oversight of multiple active projects ranging from $10M to $30M+. Brings hands on command of the full project lifecycle, from preconstruction and design coordination through procurement, scheduling, field execution, and closeout. Proven track record managing subcontractor relationships, RFI and submittal workflows, and budget controls while keeping stakeholders informed and projects on schedule. Comfortable operating in highly regulated environments and experienced working alongside public agency clients, architects, and multi discipline engineering teams.`\n};\n\n// Route to a candidate track from role/company keywords. Construction is checked first\n// because \"project manager\"/\"engineer\" otherwise get swept into IT. Default = IT (largest segment).\nfunction pickTrack(hay) {\n  const constructionCtx = /\\b(construction|contractor|building|civil|jobsite|job site|preconstruction|subcontractor|general contractor)\\b/.test(hay);\n  if (/\\b(superintendent|estimator)\\b/.test(hay) || /\\bconstruction\\b/.test(hay) || (/\\bproject manager\\b/.test(hay) && constructionCtx)) {\n    return 'Construction';\n  }\n  if (/\\b(finance|accounting|controller|fp&a|fp and a|cfo|treasury|treasurer|bookkeeper|accountant|auditor)\\b/.test(hay)) {\n    return 'Finance';\n  }\n  if (/\\b(it|software|developer|engineer|cloud|data|security|infrastructure|pm|scrum|devops|architect|systems|network|qa|technical|cyber|sre|sysadmin)\\b/.test(hay)) {\n    return 'IT';\n  }\n  return 'IT';\n}\n\nconst systemPrompt = `You are writing an 8-email outbound business development sequence for a staffing and recruiting firm. The emails go to a likely hiring manager or functional leader after a new job posting at their company is identified.\n\n--- OUR FIRM ---\n10 Pillars Solutions is an AI-enabled, human-led staffing firm that helps employers hire faster without sacrificing quality. We pair intelligent sourcing with experienced recruiter judgment, technical screening, and rigorous QA, so clients get qualified candidates, not just more resumes. We work contract, contract-to-hire, and direct-hire across IT and STEM, finance and accounting, and construction management.\n\n--- METHOD: NEPQ ---\nWrite using NEPQ principles:\n- Build problem awareness before offering any solution.\n- Lead with curiosity and questions that pull the reader into reflecting on their own hiring situation.\n- Never use pitch language, hype, or pressure.\n- Sound like a sharp human who knows this space, not a vendor working a list.\n- Let the reader feel understood before they feel sold to. In most emails you are not selling at all.\n\n--- VOICE RULES (every email) ---\n- Conversational and direct. Write like a real person typing a quick note.\n- No corporate speak, no jargon, no buzzwords.\n- Do not use dashes of any kind. No hyphens as connectors, no em dashes, no en dashes. Use commas or short sentences instead. This applies even when restating the candidate facts below.\n- No bullet points or lists in the email bodies.\n- No exclamation marks.\n- Short paragraphs, easy to skim and reply to. About a 9th grade reading level.\n- Every email body opens with this exact line: Hi FIRST_NAME,  (use the real first name given below). Then a blank line, then the body.\n- Do NOT include a signature, a sign-off name, or a contact block. The sending system adds the signature. End on your last real sentence.\n- Vary sentence openings across the eight emails. Do not start two emails the same way.\n\n--- SUBJECT LINES ---\n- 3 to 6 words. Curiosity-driven and human. No spam words, no all caps, no clickbait.\n- Emails 2 through 8 may use a short Re: style subject so the thread reads as continuing.\n\n--- DO NOT ---\n- Do not invent facts about the company, role, person, or candidate.\n- Do not mention scraping, automation, AI, monitoring, or that the role was detected automatically.\n- Do not use cliches: hope you are doing well, touching base, quick chat, pick your brain, top talent, best in class, world class, game changer, perfect fit.\n- Do not reuse the same wording or call to action across emails.\n\n--- BANNED PHRASES (must NEVER appear in any of the 8 emails, in any form) ---\n\"I came across\", \"I wanted to follow up\", \"I wanted to circle back\", \"circling back\", \"following up\", \"just checking in\", \"wanted to reach out\".\nIf you are tempted to write any of these, rewrite the sentence from scratch with a concrete, specific observation instead.\n\n--- THE 8-EMAIL ARC ---\nEach email must feel like a natural continuation, never a copy-paste reminder.\n\nEmail 1 - Noticed their specific opening. A personalized intro that shows you are paying attention to their company and this role. Reference the posted role naturally and one grounded detail about what the company does. Warm, brief, human. No pitch. A low-pressure opening to a conversation.\n\nEmail 2 - Follow up from a different angle. Add value or reframe why this hire matters now, such as timing, delivery pressure, team load, or how hard this role is to fill well. Do not restate Email 1. Stay short.\n\nEmail 3 - A reflective question. Pull engagement instead of pitching. Ask something real, like what has been the hardest part of filling this role, or where the pressure is coming from. One genuine question. Do not offer a solution yet.\n\nEmail 4 - Candidate sizzle. Reference their open role, then introduce the anonymized candidate described in CANDIDATE SIZZLE below, who recently came off a project and could be a fit. Phrase it naturally, for example: if the role is still open, we have someone who might be worth a quick conversation, then describe the person in a few human sentences. Do not paste a resume and do not use bullets. Make it read like you are telling them about a strong person you know.\n\nEmail 5 - Industry insight. Share one genuinely useful, grounded observation about hiring or talent trends in their space. Pure credibility builder. No candidate, no pitch, no ask beyond an open door.\n\nEmail 6 - Soft check-in. Brief and conversational. Make it easy to say not right now. For example: if the timing is not right, no problem, happy to be a resource when the need comes up.\n\nEmail 7 - Candidate sizzle callback. Refer back to the SAME candidate from Email 4. Add gentle, honest urgency: the person you mentioned a few weeks ago is still available but actively interviewing, and ask if it is worth a quick conversation before they are off the market. Low pressure, not pushy.\n\nEmail 8 - Breakup that leaves the door open. The last note on this. Clean and gracious, no guilt. For example: this is the last note from me on this one, and when staffing needs come up down the road, you know where to find me.\n\n--- CANDIDATE SIZZLE (Emails 4 and 7 only, same person in both) ---\nUse ONLY the candidate provided in the user message. Weave the details in as natural prose, never as a list, and never add facts that are not given.\n- Refer to the candidate as they/them. Never assign a gender (no he, she, his, her).\n- Preserve the candidate's specific numbers and metrics verbatim: dollar amounts, team sizes, years of experience, and named certifications or tools. Do not soften them into vague phrases like \"significant budgets\" or \"large teams.\" The concrete numbers are the point.\n\n--- OUTPUT FORMAT ---\nRespond ONLY with this exact JSON object, no markdown and no extra text:\n{\n  \"email_1_subject\": \"...\",\n  \"email_1_body\": \"...\",\n  \"email_2_subject\": \"...\",\n  \"email_2_body\": \"...\",\n  \"email_3_subject\": \"...\",\n  \"email_3_body\": \"...\",\n  \"email_4_subject\": \"...\",\n  \"email_4_body\": \"...\",\n  \"email_5_subject\": \"...\",\n  \"email_5_body\": \"...\",\n  \"email_6_subject\": \"...\",\n  \"email_6_body\": \"...\",\n  \"email_7_subject\": \"...\",\n  \"email_7_body\": \"...\",\n  \"email_8_subject\": \"...\",\n  \"email_8_body\": \"...\",\n  \"personalization_angle\": \"...\",\n  \"recipient_reasoning\": \"...\",\n  \"scaling_hypothesis\": \"...\",\n  \"candidate_track\": \"IT | Finance | Construction\"\n}\n\nField notes:\n- Each email body must contain the full email text starting with the Hi FIRST_NAME, line, with blank lines between paragraphs and no signature.\n- personalization_angle: one sentence on the primary company customization used.\n- recipient_reasoning: one sentence on why this person was selected as the likely contact.\n- scaling_hypothesis: one sentence on why this role likely matters now.\n- candidate_track: echo back which sizzle track you were given (IT, Finance, or Construction).`;\n\nfor (const item of $input.all()) {\n  const d = item.json;\n\n  const contactName = d.contact_name || '';\n  const firstName = contactName.split(' ')[0] || '';\n  const hasName = firstName.length > 0;\n  const greetingInstruction = hasName\n    ? 'Open every email with this exact line: Hi ' + firstName + ',  then a blank line, then the body. Use the real name, not a placeholder or a merge tag.'\n    : 'The recipient first name is not known. Open every email with the bare line: Hi,  on its own line, then a blank line, then the body. Do not use Hiring Manager, there, or any placeholder name.';\n\n  // Seniority tier for tone guidance\n  const title = (d.contact_title || '').toLowerCase();\n  let seniorityTier;\n  if (/\\b(vp|vice president|director|chief|cto|coo|ceo|cfo|head of|svp|evp)\\b/.test(title)) {\n    seniorityTier = 'senior — use more concise, outcome-focused, commercial language';\n  } else if (/\\b(manager|lead|senior|sr\\.?|principal)\\b/.test(title)) {\n    seniorityTier = 'mid-level — use slightly more collaborative, role-specific language';\n  } else {\n    seniorityTier = 'unknown — write for a likely functional leader; keep the fallback ask polite';\n  }\n\n  // Candidate sizzle routing for emails 4 and 7\n  const routeHay = ((d.job_title || '') + ' ' + (d.company_industry || '') + ' ' + (d.skills || '') + ' ' + (d.job_description || '')).toLowerCase();\n  const candidateTrack = pickTrack(routeHay);\n  const selectedSizzle = SIZZLE[candidateTrack];\n\n  const userPrompt = `Generate an 8-email warm outreach sequence for this opportunity:\n\n--- COMPANY ---\nName: ${d.company_name || 'Unknown'}\nDomain: ${d.company_domain || 'Unknown'}\nIndustry: ${d.company_industry || 'Not specified'}\nHQ: ${d.company_hq || 'Not specified'}\nDescription: ${d.company_summary || 'Not available'}\nHiring Signals: ${d.hiring_signals || 'None identified'}\nTech Stack in JD: ${d.tech_stack || 'Not specified'}\n\n--- ROLE ---\nJob Title: ${d.job_title || 'Unknown'}\nLocation: ${d.location || 'Unknown'}\nSeniority: ${d.seniority || 'Not specified'}\nEmployment Type: ${d.employment_type || 'Not specified'}\nSkills Mentioned: ${d.skills || 'Not specified'}\nJob Description (excerpt):\n${(d.job_description || '').substring(0, 1000)}\n\n--- CONTACT ---\nName: ${contactName || 'Not available'}\nFirst Name: ${firstName || 'Not available'}\nTitle: ${d.contact_title || 'Unknown'}\nSeniority Tier: ${seniorityTier}\nWhy They Were Selected: ${d.contact_reasoning || 'Best available contact for this role'}\n\n--- CANDIDATE SIZZLE (use in Emails 4 and 7, same person in both) ---\nTrack: ${candidateTrack}\n${selectedSizzle}\n\n${greetingInstruction}`;\n\n  results.push({\n    json: {\n      ...d,\n      _system_prompt: systemPrompt,\n      _user_prompt: userPrompt,\n      _contact_first_name: firstName,\n      _candidate_track: candidateTrack\n    }\n  });\n}\n\nreturn results;\n"
+        },
+        "id": "wf3-build-prompt",
+        "name": "Build Outreach Prompt",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          448,
+          384
+        ]
+      },
+      {
+        "parameters": {
+          "rules": {
+            "values": [
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": false,
+                    "leftValue": "",
+                    "typeValidation": "strict"
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $vars.LLM_PROVIDER }}",
+                      "rightValue": "anthropic",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "Claude"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": false,
+                    "leftValue": "",
+                    "typeValidation": "strict"
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $vars.LLM_PROVIDER }}",
+                      "rightValue": "openai",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      }
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "OpenAI"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "wf3-llm-router",
+        "name": "LLM Provider Router",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3,
+        "position": [
+          672,
+          384
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "x-api-key",
+                "value": "={{ $vars.ANTHROPIC_API_KEY }}"
+              },
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              },
+              {
+                "name": "content-type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"model\": \"{{ $vars.ANTHROPIC_MODEL || 'claude-opus-4-6' }}\",\n  \"max_tokens\": 6000,\n  \"system\": {{ JSON.stringify($json._system_prompt) }},\n  \"messages\": [\n    {\"role\": \"user\", \"content\": {{ JSON.stringify($json._user_prompt) }}}\n  ]\n}",
+          "options": {}
+        },
+        "id": "wf3-claude-call",
+        "name": "Claude API Call",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4,
+        "position": [
+          880,
+          272
+        ],
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.openai.com/v1/chat/completions",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $vars.OPENAI_API_KEY }}"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"model\": \"gpt-4o-mini\",\n  \"max_tokens\": 6000,\n  \"response_format\": {\"type\": \"json_object\"},\n  \"messages\": [\n    {\"role\": \"system\", \"content\": {{ JSON.stringify($json._system_prompt) }}},\n    {\"role\": \"user\", \"content\": {{ JSON.stringify($json._user_prompt) }}}\n  ]\n}",
+          "options": {}
+        },
+        "id": "wf3-openai-call",
+        "name": "OpenAI GPT-4o Call",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4,
+        "position": [
+          880,
+          512
+        ],
+        "continueOnFail": true
+      },
+      {
+        "parameters": {},
+        "id": "wf3-merge-llm",
+        "name": "Merge LLM Output",
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3.2,
+        "position": [
+          1104,
+          384
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "/**\n * WF3 — Parse LLM Response (8-email)\n * Tags items with _parse_status='success' | 'fail' for downstream routing.\n * On parse failure: emits minimal diagnostic fields only, no placeholder OQ row.\n * Route Parse Result IF sends success -> Write to OQ, fail -> Log Parse Failure.\n */\nconst results = [];\nconst originalItems = $('Build Outreach Prompt').all();\n\nfor (let i = 0; i < $input.all().length; i++) {\n  const item = $input.all()[i];\n  const d = item.json;\n  const orig = originalItems[i] ? originalItems[i].json : {};\n  let parsed = null;\n  let parseError = null;\n  let rawForLog = '';\n\n  try {\n    if (d.choices && d.choices[0]) {\n      const raw = d.choices[0].message?.content || '{}';\n      rawForLog = raw;\n      const cleaned = raw.replace(/```json?\\s*/g, '').replace(/```\\s*/g, '').trim();\n      parsed = JSON.parse(cleaned);\n    } else if (d.content && d.content[0]) {\n      const raw = d.content[0].text || '{}';\n      rawForLog = raw;\n      const cleaned = raw.replace(/```json?\\s*/g, '').replace(/```\\s*/g, '').trim();\n      parsed = JSON.parse(cleaned);\n    } else if (d.email_1_subject) {\n      parsed = d;\n    } else if (d.error) {\n      throw new Error('LLM API error: ' + (d.error.message || JSON.stringify(d.error)));\n    } else {\n      throw new Error('Unrecognized LLM response shape');\n    }\n  } catch(e) {\n    parseError = e.message;\n  }\n\n  if (parseError) {\n    results.push({ json: {\n      _parse_status: 'fail',\n      opportunity_id: orig.opportunity_id || '',\n      company_name: orig.company_name || '',\n      contact_email: orig.contact_email || '',\n      contact_name: orig.contact_name || '',\n      job_title: orig.job_title || '',\n      parse_error: parseError,\n      raw_excerpt: rawForLog.substring(0, 500),\n      llm_provider: $vars.LLM_PROVIDER || 'openai'\n    }});\n    continue;\n  }\n\n  const contactFirst = (orig.contact_name || '').split(' ')[0] || '';\n  const companyName = orig.company_name || '';\n  const clean = (str) => (str || '')\n    .replace(/\\b(Hi|Hello|Dear)[,\\s]*Hiring(?:\\s+Manager)?\\b/gi, (_, g) => contactFirst ? g + ' ' + contactFirst : g + ',')\n    .replace(/\\[Hiring Manager\\]/gi, contactFirst)\n    .replace(/\\[First Name\\]/gi, contactFirst)\n    .replace(/\\[Name\\]/gi, contactFirst)\n    .replace(/\\[Your Name\\]/gi, 'Michael')\n    .replace(/\\[Company Name\\]/gi, companyName)\n    .replace(/\\[Company\\]/gi, companyName)\n    .replace(/\\s*—\\s*/g, ', ')\n    .replace(/\\s*--\\s*/g, ', ')\n    .replace(/\\s*–\\s*/g, ', ')\n    .replace(/([A-Za-z])-([A-Za-z])/g, '$1 $2')   // strip intra-word hyphens (cross-functional -> cross functional)\n    .replace(/([A-Za-z])-([A-Za-z])/g, '$1 $2')   // second pass for chained hyphens (state-of-the-art)\n    .replace(/(\\d)-([A-Za-z])/g, '$1 $2')         // digit-letter (12-plus -> 12 plus)\n    .replace(/([A-Za-z])-(\\d)/g, '$1 $2')         // letter-digit (leaves date/range digit-digit like 2026-06-01 intact)\n    // Deterministic banned-phrase scrub — safety net for when the LLM ignores the prompt ban.\n    .replace(/I wanted to circle back to/gi, 'About')\n    .replace(/I wanted to circle back/gi, 'A quick note')\n    .replace(/circling back to/gi, 'returning to')\n    .replace(/circling back/gi, 'returning')\n    .replace(/I came across/gi, 'I noticed')\n    .replace(/I wanted to follow up/gi, 'One more thought')\n    .replace(/following up/gi, 'writing again')\n    .replace(/just checking in/gi, 'a quick note')\n    .replace(/wanted to reach out/gi, 'wanted to write')\n    // Broader cliche scrub (hyphens already stripped to spaces above, so match spaced forms)\n    .replace(/touching base/gi, 'a quick note')\n    .replace(/quick chat/gi, 'quick conversation')\n    .replace(/pick your brain/gi, 'get your perspective')\n    .replace(/top talent/gi, 'strong candidates')\n    .replace(/best in class/gi, 'strong')\n    .replace(/world class/gi, 'excellent')\n    .replace(/game changer/gi, 'meaningful step')\n    .replace(/perfect fit/gi, 'strong fit')\n    .replace(/hope (?:you are|you're|youre) doing well/gi, 'I hope things are going well')\n    .replace(/[ \\t]+\\n/g, '\\n')     // strip trailing spaces on each line\n    .replace(/\\n{3,}/g, '\\n\\n')     // collapse 3+ blank lines to a single paragraph break\n    .trim()                          // remove leading/trailing whitespace and blank lines\n    .replace(/^([a-z])/, c => c.toUpperCase());  // re-capitalize first char after any scrub rewrite\n\n  results.push({\n    json: {\n      _parse_status: 'success',\n      opportunity_id: orig.opportunity_id || '',\n      company_name: orig.company_name || '',\n      company_domain: orig.company_domain || '',\n      contact_name: orig.contact_name || '',\n      contact_title: orig.contact_title || '',\n      contact_email: orig.contact_email || '',\n      job_title: orig.job_title || '',\n      location: orig.location || '',\n      company_summary: orig.company_summary || '',\n      company_industry: orig.company_industry || '',\n      seniority: orig.seniority || '',\n      skills: orig.skills || '',\n      confidence_score: orig.confidence_score || '',\n      contact_reasoning: orig.contact_reasoning || '',\n      linkedin_url: orig.linkedin_url || '',\n      source_url: orig.source_url || '',\n      posted_date: orig.posted_date || '',\n      email_1_subject: clean(parsed.email_1_subject) || '',\n      email_1_body: clean(parsed.email_1_body) || '',\n      email_2_subject: clean(parsed.email_2_subject) || '',\n      email_2_body: clean(parsed.email_2_body) || '',\n      email_3_subject: clean(parsed.email_3_subject) || '',\n      email_3_body: clean(parsed.email_3_body) || '',\n      email_4_subject: clean(parsed.email_4_subject) || '',\n      email_4_body: clean(parsed.email_4_body) || '',\n      email_5_subject: clean(parsed.email_5_subject) || '',\n      email_5_body: clean(parsed.email_5_body) || '',\n      email_6_subject: clean(parsed.email_6_subject) || '',\n      email_6_body: clean(parsed.email_6_body) || '',\n      email_7_subject: clean(parsed.email_7_subject) || '',\n      email_7_body: clean(parsed.email_7_body) || '',\n      email_8_subject: clean(parsed.email_8_subject) || '',\n      email_8_body: clean(parsed.email_8_body) || '',\n      personalization_angle: parsed.personalization_angle || '',\n      recipient_reasoning: parsed.recipient_reasoning || '',\n      scaling_hypothesis: parsed.scaling_hypothesis || '',\n      candidate_track: parsed.candidate_track || orig._candidate_track || '',\n      approval_status: 'pending',\n      sent_status: 'unsent',\n      sent_timestamp: '',\n      llm_provider: $vars.LLM_PROVIDER || 'openai',\n      generated_at: new Date().toISOString()\n    }\n  });\n}\n\nreturn results;\n"
+        },
+        "id": "wf3-parse-response",
+        "name": "Parse LLM Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1328,
+          384
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "append",
+          "documentId": {
+            "__rl": true,
+            "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Outreach Queue",
+            "mode": "name"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "opportunity_id": "={{ $json.opportunity_id }}",
+              "contact_name": "={{ $json.contact_name }}",
+              "company_name": "={{ $json.company_name }}",
+              "contact_email": "={{ $json.contact_email }}",
+              "job_title": "={{ $json.job_title }}",
+              "email_1_subject": "={{ $json.email_1_subject }}",
+              "email_1_body": "={{ $json.email_1_body }}",
+              "email_2_subject": "={{ $json.email_2_subject }}",
+              "email_2_body": "={{ $json.email_2_body }}",
+              "email_3_subject": "={{ $json.email_3_subject }}",
+              "email_3_body": "={{ $json.email_3_body }}",
+              "posted_date": "={{ $json.posted_date }}",
+              "source_url": "={{ $json.source_url }}",
+              "approval_status": "pending",
+              "sent_status": "unsent",
+              "follow_up_stage": "0",
+              "scheduled_date": "",
+              "company_domain": "={{ $json.company_domain }}",
+              "personalization_angle": "={{ $json.personalization_angle }}",
+              "recipient_reasoning": "={{ $json.recipient_reasoning }}",
+              "scaling_hypothesis": "={{ $json.scaling_hypothesis }}",
+              "email_4_subject": "={{ $json.email_4_subject }}",
+              "email_4_body": "={{ $json.email_4_body }}",
+              "email_5_subject": "={{ $json.email_5_subject }}",
+              "email_5_body": "={{ $json.email_5_body }}",
+              "email_6_subject": "={{ $json.email_6_subject }}",
+              "email_6_body": "={{ $json.email_6_body }}",
+              "email_7_subject": "={{ $json.email_7_subject }}",
+              "email_7_body": "={{ $json.email_7_body }}",
+              "email_8_subject": "={{ $json.email_8_subject }}",
+              "email_8_body": "={{ $json.email_8_body }}"
+            },
+            "matchingColumns": [],
+            "schema": [
+              {
+                "id": "opportunity_id",
+                "displayName": "opportunity_id",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "contact_name",
+                "displayName": "contact_name",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "company_name",
+                "displayName": "company_name",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "company_domain",
+                "displayName": "company_domain",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "contact_email",
+                "displayName": "contact_email",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "job_title",
+                "displayName": "job_title",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_1_subject",
+                "displayName": "email_1_subject",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_1_body",
+                "displayName": "email_1_body",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_2_subject",
+                "displayName": "email_2_subject",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_2_body",
+                "displayName": "email_2_body",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_3_subject",
+                "displayName": "email_3_subject",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_3_body",
+                "displayName": "email_3_body",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "approval_status",
+                "displayName": "approval_status",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "sent_status",
+                "displayName": "sent_status",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "sent_timestamp",
+                "displayName": "sent_timestamp",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "posted_date",
+                "displayName": "posted_date",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "source_url",
+                "displayName": "source_url",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "follow_up_stage",
+                "displayName": "follow_up_stage",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "scheduled_date",
+                "displayName": "scheduled_date",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "personalization_angle",
+                "displayName": "personalization_angle",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "recipient_reasoning",
+                "displayName": "recipient_reasoning",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "scaling_hypothesis",
+                "displayName": "scaling_hypothesis",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_4_subject",
+                "displayName": "email_4_subject",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_4_body",
+                "displayName": "email_4_body",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_5_subject",
+                "displayName": "email_5_subject",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_5_body",
+                "displayName": "email_5_body",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_6_subject",
+                "displayName": "email_6_subject",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_6_body",
+                "displayName": "email_6_body",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_7_subject",
+                "displayName": "email_7_subject",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_7_body",
+                "displayName": "email_7_body",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_8_subject",
+                "displayName": "email_8_subject",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "email_8_body",
+                "displayName": "email_8_body",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "options": {}
+        },
+        "id": "wf3-write-outreach-queue",
+        "name": "Write to Outreach Queue",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4,
+        "position": [
+          1552,
+          384
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "7dIWwoowtD1RTjmu",
+            "name": "Google Sheets account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "appendOrUpdate",
+          "documentId": {
+            "__rl": true,
+            "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Opportunities",
+            "mode": "name"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "opportunity_id": "={{ $json.opportunity_id }}",
+              "status": "draft_ready"
+            },
+            "matchingColumns": [
+              "opportunity_id"
+            ]
+          },
+          "options": {}
+        },
+        "id": "wf3-update-opp-status",
+        "name": "Update Opportunity to draft_ready",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4,
+        "position": [
+          1760,
+          384
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "7dIWwoowtD1RTjmu",
+            "name": "Google Sheets account"
+          }
+        }
+      },
+      {
+        "parameters": {},
+        "id": "wf3-error-handler",
+        "name": "Error Handler",
+        "type": "n8n-nodes-base.errorTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          720
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "append",
+          "documentId": {
+            "__rl": true,
+            "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Errors",
+            "mode": "name"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "timestamp": "={{ $now.toISO() }}",
+              "workflow_name": "WF3: Outreach Draft Generation",
+              "node_name": "={{ $json.execution.lastNodeExecuted }}",
+              "error_message": "={{ $json.execution.error.message }}",
+              "input_data": "={{ JSON.stringify($json.execution.error.context || {}) }}"
+            }
+          },
+          "options": {}
+        },
+        "id": "wf3-write-error",
+        "name": "Write Error to Sheet",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4,
+        "position": [
+          224,
+          720
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "7dIWwoowtD1RTjmu",
+            "name": "Google Sheets account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "content": "## WF3: Outreach Draft Generation\n\nGenerates personalized outreach using LLM.\n\n**Flow:**\n1. Receive opportunity + contact from WF2 (or manual)\n2. Build structured LLM prompt\n3. Route to OpenAI GPT-4o or Claude (via LLM_PROVIDER env)\n4. Parse JSON response\n5. Write to Outreach Queue sheet\n6. Update Opportunities status to draft_ready\n7. Create Google Doc review packet\n\n**Toggle LLM:**\n- LLM_PROVIDER=openai → GPT-4o\n- LLM_PROVIDER=anthropic → Claude\n\n**Env vars needed:**\n- LLM_PROVIDER\n- OPENAI_API_KEY\n- ANTHROPIC_API_KEY\n- ANTHROPIC_MODEL\n- GOOGLE_SHEETS_ID\n- GOOGLE_DOCS_FOLDER_ID",
+          "height": 360,
+          "width": 280
+        },
+        "id": "wf3-sticky",
+        "name": "Sticky Note",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -208,
+          208
+        ]
+      },
+      {
+        "id": "wf3-route-parse-result",
+        "name": "Route Parse Result",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          1440,
+          384
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            },
+            "conditions": [
+              {
+                "id": "parse-status-success",
+                "leftValue": "={{ $json._parse_status }}",
+                "rightValue": "success",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "wf3-log-parse-failure",
+        "name": "Log Parse Failure",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4,
+        "position": [
+          1552,
+          540
+        ],
+        "parameters": {
+          "operation": "append",
+          "documentId": {
+            "__rl": true,
+            "value": "={{ $vars.GOOGLE_SHEETS_ID }}",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Errors",
+            "mode": "name"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "timestamp": "={{ $now.toISO() }}",
+              "workflow_name": "WF3: Outreach Draft Generation",
+              "node_name": "Parse LLM Response",
+              "error_message": "={{ $json.parse_error }}",
+              "input_data": "={{ JSON.stringify({opportunity_id: $json.opportunity_id, company_name: $json.company_name, contact_email: $json.contact_email, job_title: $json.job_title, llm_provider: $json.llm_provider, raw_excerpt: $json.raw_excerpt}) }}"
+            }
+          },
+          "options": {}
+        },
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "7dIWwoowtD1RTjmu",
+            "name": "Google Sheets account"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 10000
+      }
+    ],
+    "connections": {
+      "Build Outreach Prompt": {
+        "main": [
+          [
+            {
+              "node": "LLM Provider Router",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "LLM Provider Router": {
+        "main": [
+          [
+            {
+              "node": "Claude API Call",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "OpenAI GPT-4o Call",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Claude API Call": {
+        "main": [
+          [
+            {
+              "node": "Merge LLM Output",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OpenAI GPT-4o Call": {
+        "main": [
+          [
+            {
+              "node": "Merge LLM Output",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Merge LLM Output": {
+        "main": [
+          [
+            {
+              "node": "Parse LLM Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Write to Outreach Queue": {
+        "main": [
+          [
+            {
+              "node": "Update Opportunity to draft_ready",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Error Handler": {
+        "main": [
+          [
+            {
+              "node": "Write Error to Sheet",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Build Outreach Prompt",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Manual Trigger": {
+        "main": [
+          [
+            {
+              "node": "Build Outreach Prompt",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse LLM Response": {
+        "main": [
+          [
+            {
+              "node": "Route Parse Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route Parse Result": {
+        "main": [
+          [
+            {
+              "node": "Write to Outreach Queue",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Log Parse Failure",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Michael Byrne",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-06-03T18:13:46.768Z",
+        "id": 723,
+        "workflowId": "T1jTXreAw0uZ2TOD",
+        "versionId": "5eb8662b-cc0e-4188-94d4-8379abf1c04f",
+        "event": "activated",
+        "userId": "df188ec2-208c-4f14-a4f7-25f762dc17a3"
+      },
+      {
+        "createdAt": "2026-06-03T18:13:46.682Z",
+        "id": 722,
+        "workflowId": "T1jTXreAw0uZ2TOD",
+        "versionId": "5eb8662b-cc0e-4188-94d4-8379abf1c04f",
+        "event": "deactivated",
+        "userId": "df188ec2-208c-4f14-a4f7-25f762dc17a3"
+      }
+    ]
+  }
+}

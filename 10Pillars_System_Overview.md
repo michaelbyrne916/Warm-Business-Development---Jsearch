@@ -1,5 +1,5 @@
 # 10 Pillars Solutions — System Overview
-**Last updated:** 2026-05-13  
+**Last updated:** 2026-06-01  
 **Instance:** michaelbyrne916.app.n8n.cloud  
 **Owner:** Michael Byrne — michael@10pillarssolutions.com
 
@@ -12,7 +12,7 @@ This document tracks all active, queued, and archived automation projects across
 | Project | Status | Target / Notes |
 |---------|--------|---------------|
 | Warm Outreach Pipeline | **LAUNCH-READY** | Activation Sunday 2026-05-17 |
-| Cold BD Plan / Cold Outreach | **LAUNCH-READY** | Activation Sunday 2026-05-17 |
+| Cold BD Plan / Cold Outreach | **LIVE & SENDING** | 19 active Instantly campaigns, 1,447 contacts sending; ~2,465 queued for 2026-06-08. Sunday Batch + Monthly Ingestion + Reply Handler all active. n4 + n18 bugs fixed 2026-06-01 |
 | Strategic ABM System | **COMPLETE** | In production |
 | PillarSignal | **SCRAPPED** | Archived — indefinite hold |
 | SLED Signal Intelligence Tool | **DESIGN COMPLETE** | Queued for build — target late May / early June 2026 |
@@ -65,15 +65,17 @@ Automated cold email campaign system using Instantly.ai. Receives warm-unrespons
 
 | Workflow | ID | Trigger | Status | Purpose |
 |----------|----|---------|--------|---------|
-| WF7: Cold Campaign Sunday Batch | `Bk4CkgOMr6t6XTG6` | Schedule — Sunday 6am | **INACTIVE** (activate 5/17) | Generates cold email templates via Claude API, uploads to Instantly |
+| WF7: Cold Campaign Sunday Batch | `Bk4CkgOMr6t6XTG6` | Schedule — Sunday 6am | **ACTIVE** — next run 2026-06-08 | Generates cold email templates via Claude API, uploads to Instantly. n4 (group by industry+touch) + n18 (`skip_if_in_campaign:false`) bugs fixed 2026-06-01 |
+| Cold Campaign — Monthly Ingestion | `O0nSShLUPvu38JRh` | Schedule — monthly | **ACTIVE** | Wave-gated ingestion of new contacts into the Sequence Tracker |
+| Cold Campaign — Reply & Booking Handler | `W7HdGM8eoAGlQJza` | Instantly webhook | **ACTIVE** | Writes reply/bounce/unsubscribe status to the Sequence Tracker; notifies on replies |
 
-### Pre-Launch Checklist
+### Launch Checklist (executed — Cold BD is LIVE as of 2026-05-20, full multi-touch live 2026-06-01)
 
 - [x] WF7 source filter: new contacts gated to `source = project1_warmout` only
 - [x] WF7 LAUNCH_DATE = `2026-05-10` (ensures Week 1 ramp tier on activation day)
 - [x] WF6 REJECT guard hardened (prevents rejected OQ rows entering Sequence Tracker)
 - [x] retryOnFail applied to all WF7 Sheets write nodes (n11/n19/n21/n23)
-- [ ] **ACTIVATION DAY:** Activate WF7 (`Bk4CkgOMr6t6XTG6`) before 6am 2026-05-17
+- [x] **ACTIVATED** — WF7 (`Bk4CkgOMr6t6XTG6`) live; Monthly Ingestion + Reply Handler also active
 
 ### Sunday 5/17 Activation — Cold Pipeline
 
